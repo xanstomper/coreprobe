@@ -259,7 +259,7 @@ class BfuGapStanceTest(unittest.TestCase):
     def test_stance_has_gap_lines(self):
         from opensleuth import forensics as F
         out = F.render_stance()
-        self.assertIn("where CoreProbe needs work to beat them", out)
+        self.assertIn("where CoreProbe stands vs those gaps", out)
         self.assertIn("ARTIFACT BREADTH", out)
         self.assertIn("COURT-READY REPORTING", out)
         self.assertIn("BFU PASSCODE BYPASS", out)

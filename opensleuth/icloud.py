@@ -38,6 +38,17 @@ def _pyicloud():
         return None
 
 
+def _safe(fn, name: str, retries: int = 2) -> tuple[Any, str | None]:
+    """Call a pyicloud service with retries; returns (data, error)."""
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            return fn(), None
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+    return None, f"{name} failed after {retries + 1} attempts: {last}"[:200]
+
+
 def acquire(args) -> dict[str, Any]:
     gate = auth_gate(args)
     if gate:
@@ -77,38 +88,33 @@ def acquire(args) -> dict[str, Any]:
         "devices": [],
     }
 
-    try:
-        for c in list(api.contacts.all())[:2000]:
+    contacts, err = _safe(lambda: list(api.contacts.all())[:2000], "contacts")
+    if err:
+        data["contacts_error"] = err
+    else:
+        for c in contacts or []:
             rec = {k: v for k, v in c.items() if v is not None and k not in ("_recordName",)}
             data["contacts"].append(rec)
-    except Exception as exc:  # noqa: BLE001
-        data["contacts_error"] = str(exc)[:200]
 
-    try:
-        data["calendars"] = list(api.calendar.events())[:500]
-    except Exception as exc:  # noqa: BLE001
-        data["calendars_error"] = str(exc)[:200]
+    cal, err = _safe(lambda: list(api.calendar.events())[:500], "calendars")
+    if err: data["calendars_error"] = err
+    else: data["calendars"] = cal or []
 
-    try:
-        data["notes"] = list(api.notes.get_notes())[:500]
-    except Exception as exc:  # noqa: BLE001
-        data["notes_error"] = str(exc)[:200]
+    notes, err = _safe(lambda: list(api.notes.get_notes())[:500], "notes")
+    if err: data["notes_error"] = err
+    else: data["notes"] = notes or []
 
-    try:
-        data["reminders"] = list(api.reminders.get_reminders())[:500]
-    except Exception as exc:  # noqa: BLE001
-        data["reminders_error"] = str(exc)[:200]
+    rem, err = _safe(lambda: list(api.reminders.get_reminders())[:500], "reminders")
+    if err: data["reminders_error"] = err
+    else: data["reminders"] = rem or []
 
-    try:
-        photos = api.photos.all()
-        data["photos_count"] = len(list(photos))
-    except Exception as exc:  # noqa: BLE001
-        data["photos_error"] = str(exc)[:200]
+    photos, err = _safe(lambda: len(list(api.photos.all())), "photos")
+    if err: data["photos_error"] = err
+    elif photos is not None: data["photos_count"] = photos
 
-    try:
-        data["devices"] = list(api.devices.all())
-    except Exception as exc:  # noqa: BLE001
-        data["devices_error"] = str(exc)[:200]
+    devs, err = _safe(lambda: list(api.devices.all()), "devices")
+    if err: data["devices_error"] = err
+    else: data["devices"] = devs or []
 
     (out / "icloud-report.json").write_text(
         __import__("json").dumps(data, indent=2, default=str))

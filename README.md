@@ -33,6 +33,9 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | BFU AES keyset capture (`acquire bfu --keys` - gaster/ipwndfu from pwned device) | Python + checkm8 tooling | ✅ |
 | Escrow/paired-computer acquisition (`escrow find/describe/unlock` - passcode-free path, all models) | Python + pyiosbackup | ✅ |
 | usbliter8 BFU playbook (`acquire bfu --route usbliter8` - A12/A13 step-by-step) | Python | ✅ |
+| Court-ready reporting (`certify` - native-hash manifest + HMAC seal + verify) | Python + native core | ✅ |
+| iLEAPP artifact bridge (`ileapp run/breath` - 100+ parsers, external engine) | Python + iLEAPP | ✅ |
+| Ecosystem (CI workflow, CONTRIBUTING, SECURITY, MIT LICENSE) | GitHub Actions | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |

@@ -1,3 +1,4 @@
+import os
 """Command line interface for opensleuth."""
 
 import argparse
@@ -1202,6 +1203,50 @@ def cmd_tools(args):
     print(forensics.render_tools(installed_only=args.installed))
 
 
+def cmd_ileapp_run(args):
+    from . import ileapp
+    r = ileapp.run_iLEAPP(args.input, args.out, itype=args.type)
+    if not r.get("ok"):
+        print(f"ileapp: {r.get('error')}", file=sys.stderr)
+        if r.get("log_tail"):
+            print(r["log_tail"][-500:], file=sys.stderr)
+        sys.exit(1)
+    print(f"iLEAPP completed ({r['returncode']}) -> {r['output_dir']}")
+    print("run 'opensleuth ileapp breath <case> --ileapp-out OUT --out REPORT' to merge")
+    if r.get("log_tail"):
+        print(r["log_tail"][-400:])
+
+
+def cmd_ileapp_breath(args):
+    from . import ileapp
+    r = ileapp.breath_report(args.case, args.ileapp_out, args.out)
+    print(ileapp.render_breath(r))
+
+
+def cmd_certify(args):
+    from . import certify
+    if args.verify:
+        pw = os.environ.get(args.passphrase_env) if args.passphrase_env else None
+        v = certify.verify(args.verify, passphrase=pw,
+                           keyfile=args.keyfile)
+        print(certify.render_verify(v))
+        return
+    if not args.case_dir or not args.out:
+        sys.exit("certify: provide <case-dir> --out <dir> --examiner <name> (or --verify <report>)")
+    if not args.examiner:
+        sys.exit("certify: --examiner is required for the signature block")
+    pw = os.environ.get(args.passphrase_env) if args.passphrase_env else None
+    r = certify.certify(args.case_dir, args.out, args.examiner,
+                        passphrase=pw, keyfile=args.keyfile)
+    print(f"certified {r['file_count']} files")
+    print(f"  manifest : {r['manifest']}")
+    print(f"  report   : {r['report']}")
+    print(f"  html     : {r['html']}")
+    print(f"  seal     : {r['seal'][:16]}...")
+    if r.get("seal_key"):
+        print(f"  seal key : {r['seal_key']}  (store securely; needed for verify)")
+
+
 def cmd_stance(args):
     from . import forensics
     print(forensics.render_stance())
@@ -1445,6 +1490,30 @@ def main(argv=None):
 
     st = sub.add_parser("stance", help="honest capability comparison vs Cellebrite/AXIOM/GrayKey/Elcomsoft")
     st.set_defaults(fn=cmd_stance)
+
+    from . import certify as _cert
+    ct = sub.add_parser("certify", help="court-ready reporting: chain-of-custody manifest + HMAC integrity seal")
+    ct.add_argument("case_dir", nargs="?", help="case/evidence directory to certify")
+    ct.add_argument("--out", help="output dir (required with case_dir)")
+    ct.add_argument("--examiner", default="", help="examiner name for the signature block")
+    ct.add_argument("--keyfile", help="seal key file (default: generated seal.key next to report)")
+    ct.add_argument("--passphrase-env", help="env var holding the seal passphrase")
+    ct.add_argument("--verify", metavar="REPORT", help="verify a sealed-report.json instead of certifying")
+    ct.set_defaults(fn=cmd_certify)
+
+    from . import ileapp as _il
+    il = sub.add_parser("ileapp", help="artifact breadth: run iLEAPP (100+ parsers) on an extraction and merge a breath report")
+    il_sub = il.add_subparsers(dest="il", required=True)
+    ilr = il_sub.add_parser("run", help="run iLEAPP on an extraction")
+    ilr.add_argument("input", help="extraction dir or tar/gz/zip")
+    ilr.add_argument("--out", required=True)
+    ilr.add_argument("--type", default="fs", choices=["fs", "logical", "tar", "gz", "zip"])
+    ilr.set_defaults(fn=cmd_ileapp_run)
+    ilb = il_sub.add_parser("breath", help="merge CoreProbe DB inventory + iLEAPP outputs into breath-report.json")
+    ilb.add_argument("case", help="extraction/case dir")
+    ilb.add_argument("--ileapp-out", help="iLEAPP output dir (optional)")
+    ilb.add_argument("--out", required=True)
+    ilb.set_defaults(fn=cmd_ileapp_breath)
 
     from . import doctor
     dc = sub.add_parser("doctor", help="workstation + device diagnostics (pre-case sanity pass)")

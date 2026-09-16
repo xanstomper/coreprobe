@@ -111,3 +111,30 @@ class PyiCloudHarnessTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class RetryTest(unittest.TestCase):
+    def test_safe_retries_then_fails(self):
+        calls = {"n": 0}
+
+        def boom():
+            calls["n"] += 1
+            raise RuntimeError("network")
+
+        data, err = icloud._safe(boom, "contacts", retries=2)
+        self.assertIsNone(data)
+        self.assertEqual(calls["n"], 3)
+        self.assertIn("contacts failed", err)
+
+    def test_safe_succeeds_on_retry(self):
+        calls = {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("network")
+            return [1, 2]
+
+        data, err = icloud._safe(flaky, "notes", retries=2)
+        self.assertEqual(data, [1, 2])
+        self.assertIsNone(err)
+        self.assertEqual(calls["n"], 2)
