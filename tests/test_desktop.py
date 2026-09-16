@@ -208,7 +208,8 @@ class DesktopShellTest(unittest.TestCase):
             self.assertTrue(url.startswith(f"http://127.0.0.1:{self.port}"))
         for key, _, _ in studio_desktop.NAV:
             self.assertIn(key, ("dashboard", "exploits", "reports", "devices",
-                                "settings", "tools", "research", "bfu", "evidence"))
+                                "settings", "tools", "research", "bfu",
+                                "evidence", "artifacts"))
 
     # ----- real browser-engine rendering -----
     def _wait_for(self, script, needle, timeout=15.0):
@@ -311,6 +312,38 @@ class DesktopShellTest(unittest.TestCase):
             "evidence page did not render")
         html = self._page_html()
         self.assertIn("Verify", html)
+
+    def test_artifacts_page_renders_in_browser(self):
+        self.win.view.page().runJavaScript("location.hash = 'artifacts'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Artifact Analysis"),
+            "artifacts page did not render")
+        html = self._page_html()
+        self.assertIn("Crash logs", html)
+        self.assertIn("Wireless", html)
+        self.assertIn("Super-timeline", html)
+
+    def test_evidence_page_has_certify_create(self):
+        self.win.view.page().runJavaScript("location.hash = 'evidence'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Certify a case directory"),
+            "evidence certify form did not render")
+        html = self._page_html()
+        self.assertIn("examiner name", html)
+
+    def test_research_page_has_surface_panel(self):
+        self.win.view.page().runJavaScript("location.hash = 'research'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Zero-Day Research"),
+            "research page did not render")
+        html = self._page_html()
+        self.assertIn("Campaigns", html)
 
     def test_nav_contains_tools(self):
         nav = {"html": ""}

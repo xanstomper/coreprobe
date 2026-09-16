@@ -1606,6 +1606,33 @@ def cmd_timeline(args):
         timeline.write_json(events, str(args.out).rsplit(".", 1)[0] + ".json")
         print(f"\n{n} events -> {args.out} (+ .json)")
 
+def cmd_crashlogs(args):
+    import json
+    from . import crashlogs
+    rows = crashlogs.scan_dir(args.dir)
+    if args.json:
+        print(json.dumps(rows, indent=2, default=str))
+        return
+    print(crashlogs.render(rows))
+
+
+def cmd_wireless(args):
+    import json
+    from . import wireless
+    rows = wireless.scan(args.dir)
+    if args.json:
+        print(json.dumps(rows, indent=2, default=str))
+        return
+    print(wireless.render(rows))
+
+
+def cmd_surface(args):
+    from . import surface
+    from .exploits import RECENT_DISCLOSURES
+    rep = surface.analyze(RECENT_DISCLOSURES)
+    print(surface.render(rep))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1922,6 +1949,19 @@ def main(argv=None):
     tl.add_argument("input", help="JSON file: {\"sms\": [...], \"calls\": [...]} or artifacts dump")
     tl.add_argument("--out", help="output CSV path (also writes .json)")
     tl.set_defaults(fn=cmd_timeline)
+
+    sf = sub.add_parser("surface", help="attack-surface analysis: rank tracked CVEs into research targets (honest)")
+    sf.set_defaults(fn=cmd_surface)
+
+    cl = sub.add_parser("crashlogs", help="parse CrashReporter .ips logs from a pull/backup")
+    cl.add_argument("dir", help="root to scan (rglob *.ips)")
+    cl.add_argument("--json", action="store_true")
+    cl.set_defaults(fn=cmd_crashlogs)
+
+    wl = sub.add_parser("wireless", help="WiFi known networks + Bluetooth artifacts from plists")
+    wl.add_argument("dir")
+    wl.add_argument("--json", action="store_true")
+    wl.set_defaults(fn=cmd_wireless)
 
     args = ap.parse_args(argv)
     args.fn(args)

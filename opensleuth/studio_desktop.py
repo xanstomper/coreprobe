@@ -29,6 +29,7 @@ NAV = [
     ("research", "Research", "Ctrl+6"),
     ("bfu", "BFU Lab", "Ctrl+7"),
     ("evidence", "Evidence", "Ctrl+8"),
+    ("artifacts", "Artifacts", "Ctrl+9"),
     ("reports", "Reports", "Ctrl+3"),
     ("devices", "Devices", "Ctrl+4"),
     ("settings", "Settings", "Ctrl+5"),

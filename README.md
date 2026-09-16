@@ -44,6 +44,10 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | Zero-day research campaign (`campaign new/run/status/triage` - sessions, leads, verdict ladder) | Python | ✅ |
 | Super-timeline (`timeline` - merged artifact chronology, CSV+JSON) | Python stdlib | ✅ |
 | Web UI: Research / BFU Lab / Evidence pages + desktop NAV (browser-tested) | JS + QtWebEngine | ✅ |
+| Attack-surface analyst (`surface` - CVE-tiering into research targets) | Python | ✅ |
+| Crash-log parser (`crashlogs` - .ips metadata/exception/frames) | Python stdlib | ✅ |
+| Wireless artifacts (`wireless` - WiFi networks + Bluetooth paired/recent) | Python + plistlib | ✅ |
+| E2E case workflow test (extraction -> timeline -> certify -> verify -> tamper-detect) | pytest | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |

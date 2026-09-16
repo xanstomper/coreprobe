@@ -25,6 +25,7 @@ const ICONS = {
   phone: I('<rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/>'),
   tablet: I('<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="10" y1="18" x2="14" y2="18"/>'),
   tools: I('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
+  artifacts: I('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>'),
   research: I('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
   bfu: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
   evidence: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>'),
@@ -37,7 +38,7 @@ const NAV = [
   ["browser", "Browser"], ["chats", "Chats"], ["cloud", "Cloud"], ["contacts", "Contacts"],
   ["calendars", "Calendars"], ["calls", "Calls"], ["location", "Location"], ["media", "Media"],
   ["messages", "Messages"], ["files", "Files"], ["forensics", "Forensics"], ["reports", "Reports"],
-  ["exploits", "Exploits"], ["research", "Research"], ["bfu", "BFU Lab"], ["evidence", "Evidence"], ["tools", "Tools"], ["settings", "Settings"],
+  ["exploits", "Exploits"], ["research", "Research"], ["bfu", "BFU Lab"], ["evidence", "Evidence"], ["artifacts", "Artifacts"], ["tools", "Tools"], ["settings", "Settings"],
 ];
 const SECTION_META = {
   devices: ["Devices", "Physical and logical device data"],
@@ -59,6 +60,7 @@ const SECTION_META = {
   research: ["Research", "Zero-day research: campaigns, DFU traces, leads, patch catalog"],
   bfu: ["BFU Lab", "Modern-phone BFU: FS intelligence, keybags, decrypt engine"],
   evidence: ["Evidence", "Chain of custody: certify, verify, integrity seals"],
+  artifacts: ["Artifacts", "Crash logs, wireless, super-timeline"],
   settings: ["Settings", "Configuration and preferences"],
 };
 
@@ -891,7 +893,7 @@ const PAGES = {
   calendars: pageCalendars, calls: pageCalls, location: pageLocation, media: pageMedia,
   messages: pageMessages, files: pageFiles, forensics: pageForensics, reports: pageReports,
   exploits: pageExploits, tools: pageTools, settings: pageSettings,
-  research: pageResearch, bfu: pageBfuLab, evidence: pageEvidence,
+  research: pageResearch, bfu: pageBfuLab, evidence: pageEvidence, artifacts: pageArtifacts,
 };
 async function render() {
   const h = (location.hash || "#dashboard").slice(1);
@@ -1003,6 +1005,16 @@ async function runEscrowUnlock() {
 let CAMPAIGN = null;
 async function pageResearch() {
   try { CAMPAIGN = await api("/api/campaign"); } catch { CAMPAIGN = null; }
+  let SURF = null;
+  try { SURF = await api("/api/surface"); } catch { SURF = null; }
+  const surfRows = (SURF && SURF.targets) || [];
+  const surfHtml = surfRows.length ? `
+    <div class="panel-card"><div class="panel-card-head">Attack-surface targets (from ${(SURF.analysis && SURF.analysis.total) || 0} tracked CVEs)</div>
+    ${surfRows.map(t => `<div class="log-event"><span class="dot amber"></span><div class="log-text">
+      <b>${esc(t.component)}</b> (${t.cves} CVEs) ${t.prime_examples.length ? "&middot; PRIME: " + esc(t.prime_examples.join(", ")) : ""}
+      ${t.high_examples.length ? "&middot; HIGH: " + esc(t.high_examples.join(", ")) : ""}</div></div>`).join("")}
+    <div class="log-event"><span class="dot amber"></span><div class="log-text">These are PATCHED CVEs - the surface map. New usable 0-days come only from campaign sessions (repro + writeup).</div></div></div>
+    <div style="height:14px"></div>` : "";
   const camps = (CAMPAIGN && CAMPAIGN.campaigns) || {};
   const leads = (CAMPAIGN && CAMPAIGN.leads) || [];
   const campRows = Object.entries(camps).map(([id, c]) =>
@@ -1020,6 +1032,7 @@ async function pageResearch() {
   }).join("") || '<tr><td colspan="5">No leads yet - run a capture + dry session.</td></tr>';
   return `<div class="page-head"><div class="page-title">Zero-Day Research</div>
     <div class="page-sub">Campaign orchestrator: DFU captures -> traces -> fuzz sessions -> leads -> verdicts. Honest instrumentation: findings require reproduction + public writeup.</div></div>
+    ${surfHtml}
     <div class="panel-card"><div class="panel-card-head">Campaigns</div>
     <div class="filter-bar">
       <input class="form-input" id="cp-name" placeholder="campaign name" style="width:180px">
@@ -1115,6 +1128,14 @@ async function runKeybagUI() {
 async function pageEvidence() {
   return `<div class="page-head"><div class="page-title">Evidence & Chain of Custody</div>
     <div class="page-sub">Certify a case directory (native hashing + HMAC seal) and verify integrity.</div></div>
+    <div class="panel-card"><div class="panel-card-head">Certify a case directory</div>
+    <div class="filter-bar">
+      <input class="form-input" id="cert-dir" placeholder="case directory" style="width:280px">
+      <input class="form-input" id="cert-out" placeholder="output dir" style="width:200px">
+      <input class="form-input" id="cert-examiner" placeholder="examiner name" style="width:160px">
+      <button class="btn" onclick="runCertify()">Certify + seal</button>
+    </div></div>
+    <div style="height:14px"></div>
     <div class="panel-card"><div class="panel-card-head">Verify a sealed report</div>
     <div class="filter-bar">
       <input class="form-input" id="cert-report" placeholder="sealed-report.json path" style="width:340px">
@@ -1132,4 +1153,69 @@ async function runCertVerify() {
   out.innerHTML = `<div class="log-event"><span class="dot ${r.integrity_ok ? "green" : "red"}"></span>
     <div class="log-text">seal ${r.seal_valid ? "VALID" : "INVALID"} · ${r.file_count} files · tampered ${r.tampered}
     ${r.tampered ? r.failures.map(x => `<div class="mono">${esc(x.status)} ${esc(x.relpath)}</div>`).join("") : ""}</div></div>`;
+}
+
+/* ---------------- Artifacts page ---------------- */
+async function pageArtifacts() {
+  return `<div class="page-head"><div class="page-title">Artifact Analysis</div>
+    <div class="page-sub">Crash logs (.ips), wireless artifacts (WiFi/BT), and the merged super-timeline.</div></div>
+    <div class="panel-card"><div class="panel-card-head">Scan a pull/backup root</div>
+    <div class="filter-bar">
+      <input class="form-input" id="art-dir" placeholder="extraction root (e.g. ~/cases/C1/extraction)" style="width:340px">
+      <button class="btn" onclick="runCrashLogs()">Crash logs</button>
+      <button class="btn" onclick="runWireless()">Wireless</button>
+      <button class="btn" onclick="runSuperTimeline()">Super-timeline</button>
+    </div>
+    <div id="art-out" style="margin-top:10px"></div></div>`;
+}
+async function runCrashLogs() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  const r = await api("/api/crashlogs?dir=" + encodeURIComponent(d));
+  const s = (r && r.summary) || {};
+  const rows = (r && r.crashes) || [];
+  out.innerHTML = `
+    <div class="log-event"><span class="dot ${rows.length ? "green" : "amber"}"></span>
+    <div class="log-text"><b>${s.total || 0}</b> crash logs · by process ${esc(JSON.stringify(s.by_process || {}))}</div></div>
+    ${rows.slice(0, 20).map(c => `<div class="mono" style="padding-left:14px">· ${esc(c.timestamp || "?")} ${esc(c.process || c.name)} [${esc(c.exception_type || "?")}]</div>`).join("")}`;
+}
+async function runWireless() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  const r = await api("/api/wireless?dir=" + encodeURIComponent(d));
+  const wifi = (r && r.wifi) || [], bt = (r && r.bluetooth) || [];
+  out.innerHTML = `
+    <div class="log-event"><span class="dot ${wifi.length || bt.length ? "green" : "amber"}"></span>
+    <div class="log-text"><b>${wifi.length}</b> WiFi networks · <b>${bt.length}</b> Bluetooth entries</div></div>
+    ${wifi.slice(0, 15).map(w => `<div class="mono" style="padding-left:14px">wifi: ${esc(w.ssid || w.network_id)} ${w.bssid ? "· " + esc(w.bssid) : ""} · ${esc(w.security || "?")}</div>`).join("")}
+    ${bt.slice(0, 15).map(b => `<div class="mono" style="padding-left:14px">bt: ${esc(b.name || b.address || "?")} ${b.paired ? "· paired" : "· recent"}</div>`).join("")}`;
+}
+async function runSuperTimeline() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  // reuse dump pipeline: /api/artifacts expects case; use bfufs-style dir scan via timeline on files
+  const r = await api("/api/appcatalog?dir=" + encodeURIComponent(d));
+  const dbs = (r && r.databases) || [];
+  if (!dbs.length) { out.innerHTML = '<span class="mono">no timestamped sources found; run parsers first (opensleuth timeline input.json)</span>'; return; }
+  out.innerHTML = `<div class="log-event"><span class="dot green"></span><div class="log-text">
+    <b>${dbs.length}</b> databases found. CLI: <span class="mono">python3 -m opensleuth timeline artifacts.json --out timeline.csv</span></div></div>` +
+    dbs.slice(0, 15).map(db => `<div class="mono" style="padding-left:14px">· ${esc(db.rel)} ${db.app ? "[" + esc(db.app) + "]" : ""}</div>`).join("");
+}
+
+/* certify create (Evidence page) */
+async function runCertify() {
+  const dir = document.getElementById("cert-dir").value.trim();
+  const out = document.getElementById("cert-out").value.trim();
+  const examiner = document.getElementById("cert-examiner").value.trim();
+  if (!dir || !out || !examiner) { toast("dir, out, and examiner required", "red"); return; }
+  const r = await api("/api/certify", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({case_dir: dir, out, examiner})});
+  if (r && !r.error) {
+    toast(`certified ${r.file_count} files`, "green");
+  } else {
+    toast((r && r.error) || "failed", "red");
+  }
 }

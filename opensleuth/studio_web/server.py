@@ -597,6 +597,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, b'{"error":"dir required"}', "application/json")
                 return
             self._send(200, json.dumps({"images": firmware.scan_dir(d)}, default=str))
+        elif path == "/api/crashlogs":
+            qs = parse_qs(parsed.query)
+            from .. import crashlogs
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            rows = crashlogs.scan_dir(d)
+            self._send(200, json.dumps({"summary": crashlogs.summarize(rows),
+                                        "crashes": rows[:500]}, default=str))
+        elif path == "/api/wireless":
+            qs = parse_qs(parsed.query)
+            from .. import wireless
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            self._send(200, json.dumps(wireless.scan(d), default=str))
+        elif path == "/api/surface":
+            from .. import surface
+            from ..exploits import RECENT_DISCLOSURES
+            rep = surface.analyze(RECENT_DISCLOSURES)
+            rep_rows = rep.pop("rows")
+            self._send(200, json.dumps({"analysis": rep,
+                                        "targets": surface.research_targets(rep),
+                                        "rows": rep_rows}, default=str))
         elif path == "/api/doctor":
             from .. import doctor
             self._send(200, json.dumps(doctor.run(), default=str))
@@ -642,6 +668,17 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode()
         data = json.loads(body) if body else {}
+        if parsed.path == "/api/certify":
+            from .. import certify
+            try:
+                r = certify.certify(data.get("case_dir", ""), data.get("out", ""),
+                                    data.get("examiner", "UI Examiner"))
+                self._send(200, json.dumps({k: v for k, v in r.items()
+                                            if k != "seal_key"}, default=str))
+            except (FileNotFoundError, OSError) as exc:
+                self._send(400, json.dumps({"error": str(exc)}).encode(),
+                           "application/json")
+            return
         if parsed.path == "/api/campaign":
             from .. import campaign as C
             state = C.load()
