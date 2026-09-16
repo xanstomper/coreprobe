@@ -746,13 +746,21 @@ async function pageExploits() {
       <td>${esc(String(r.ios || "").slice(0, 42))}</td>
       <td>${esc(String(r.bfu || "").slice(0, 46))}</td>
     </tr>`).join("");
-  const discRows = discs.map(x => `
+  const discRows = discs.map(x => {
+    const k = String(x.kind || "");
+    const high = /keychain|root|kernel.?exec|kernel.?write|kernel privilege|arbitrary code|bypass/i.test(k + " " + String(x.impact || ""));
+    const badge = high
+      ? `<span class="status-pill red">HIGH-VALUE</span>`
+      : `<span class="status-pill amber">${esc(k.slice(0, 24))}</span>`;
+    return `
     <tr>
       <td class="mono">${esc(x.cve)}</td>
       <td>${esc(x.component)}</td>
+      <td>${badge}</td>
       <td class="mono">${esc(String(x.patch || "").slice(0, 30))}</td>
       <td>${esc(String(x.impact || "").slice(0, 66))}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   const expoRows = expo.map(x => `
     <tr><td class="mono">${esc(x.name || x.cve || "")}</td><td>${esc(x.match || x.kind || "")}</td>
         <td>${esc(x.hardware || x.component || "")}</td></tr>`).join("");
@@ -785,7 +793,9 @@ async function pageExploits() {
     </div>
     <div class="panel-card">
       <div class="panel-card-head">Recent disclosures (${discs.length})</div>
-      <table class="data"><thead><tr><th>CVE</th><th>Component</th><th>Patched</th><th>Impact</th></tr></thead><tbody>${discRows || '<tr><td colspan="4">None catalogued.</td></tr>'}</tbody></table>
+      <div class="filter-bar"><input class="form-input" id="disc-filter" placeholder="Filter disclosures (CVE, component, kind)..." style="width:300px" oninput="filterTable('tp-Disclosures', this.value)">
+        <span class="mono" style="margin-left:auto">red = high acquisition value</span></div>
+      <table class="data" id="tp-Disclosures"><thead><tr><th>CVE</th><th>Component</th><th>Kind</th><th>Patched</th><th>Impact</th></tr></thead><tbody>${discRows || '<tr><td colspan="5">None catalogued.</td></tr>'}</tbody></table>
     </div>`;
 }
 
