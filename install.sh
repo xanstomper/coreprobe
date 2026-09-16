@@ -32,9 +32,10 @@ apt-get install -y -qq \
   libusb-1.0-0-dev libssl-dev build-essential git curl \
   ${WITH_C8:+/usr/bin/gcc} >/dev/null
 
-echo "== pip: pymobiledevice3 + pyusb =="
-$PY -m pip install --break-system-packages -q pymobiledevice3 pyusb lz4 2>/dev/null \
-  || $PY -m pip install -q pymobiledevice3 pyusb lz4
+echo "== pip: opensleuth + pymobiledevice3 + pyusb =="
+$PY -m pip install --break-system-packages -q -e . pymobiledevice3 pyusb lz4 2>/dev/null \
+  || $PY -m pip install -q -e . pymobiledevice3 pyusb lz4
+echo "opensleuth CLI installed (usable from any directory)"
 
 if [ "$WITH_C8" = "1" ]; then
   echo "== checkm8 tooling =="

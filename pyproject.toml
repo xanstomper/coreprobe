@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opensleuth"
+version = "0.1.0"
+description = "CoreProbe / opensleuth - open-source iOS forensic triage workstation"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+desktop = ["PyQt6", "PyQt6-WebEngine"]
+
+[project.scripts]
+opensleuth = "opensleuth.cli:main"
+opensleuth-web = "opensleuth.studio_web.server:main"
+opensleuth-desktop = "opensleuth.studio_desktop:main"
+
+[tool.setuptools.packages.find]
+include = ["opensleuth*"]
+
+[tool.setuptools.package-data]
+"opensleuth.studio_web" = ["static/*"]
