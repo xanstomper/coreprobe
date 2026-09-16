@@ -327,6 +327,24 @@ The shell embeds the web backend on 127.0.0.1, with native menus
 (Navigate/View/Help), toolbar navigation, Ctrl+1-5 page shortcuts, zoom, and a
 live device status bar (model, AFU/BFU state, chip, iOS) polling `/api/device`.
 
+**Native C++ core** (zero-dependency C++17, built via CMake):
+
+```bash
+sudo ./install.sh --with-cxx          # or: cmake -B build && cmake --build build
+opensleuth cxx selftest               # FIPS SHA-256/SHA-1 vectors + MBDB unit tests
+opensleuth cxx hash --sha1 <files>    # evidence hashing (~150 MiB/s)
+opensleuth cxx verify <file> <hex>    # chain-of-custody check
+opensleuth cxx manifest <dir> --out m # SHA-256 every extracted file (sorted manifest)
+opensleuth cxx mbdb <Manifest.mbdb>   # parse backup index, flag traversal entries
+opensleuth cxx bench                  # native hashing throughput
+```
+
+The C++ parser implements the Manifest.mbdb format reverse-engineered against
+iOS 26.6.1 and flags the CVE-2026-84598 traversal shapes (`../../`, deep
+`../../../`, `SysContainerDomain-../../..` domain escapes) in both path and
+domain fields. Cross-validated in tests against the Python writer whose bytes
+were verified live on the device.
+
 The web studio binds **127.0.0.1 only** by default. To expose it (tunnel / LAN), set
 `OPENSLEUTH_HOST=0.0.0.0` explicitly. There is no built-in auth: never bind it to a
 public interface.

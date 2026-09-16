@@ -3,18 +3,20 @@
 # Installs: python deps (pymobiledevice3), libimobiledevice stack, ifuse,
 # checkm8 tooling (gaster/irecovery/palera1n), optional web studio service.
 #
-# Usage:  sudo ./install.sh [--with-web-service] [--with-checkm8-tools] [--with-desktop]
+# Usage:  sudo ./install.sh [--with-web-service] [--with-checkm8-tools] [--with-desktop] [--with-cxx]
 set -euo pipefail
 
 PY="${PYTHON:-python3}"
 WITH_WEB=0
 WITH_C8=0
 WITH_DESKTOP=0
+WITH_CXX=0
 for a in "$@"; do
   case "$a" in
     --with-web-service) WITH_WEB=1 ;;
     --with-checkm8-tools) WITH_C8=1 ;;
     --with-desktop) WITH_DESKTOP=1 ;;
+    --with-cxx) WITH_CXX=1 ;;
     *) echo "unknown arg: $a"; exit 2 ;;
   esac
 done
@@ -80,6 +82,18 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable --now opensleuth-web || true
   echo "web studio: http://127.0.0.1:9121"
+fi
+
+if [ "$WITH_CXX" = "1" ]; then
+  echo "== native C++ core (osleuth_core) =="
+  apt-get install -y -qq cmake g++ >/dev/null
+  cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+  cmake --build build -j"$(nproc)"
+  ./build/osleuth_core selftest
+  PREFIX="${HOME:-/root}/.local/bin"
+  mkdir -p "$PREFIX"
+  ln -sf "$PWD/build/osleuth_core" "$PREFIX/osleuth_core"
+  echo "native core: osleuth_core (also opensleuth cxx ...)"
 fi
 
 if [ "$WITH_DESKTOP" = "1" ]; then

@@ -1186,6 +1186,9 @@ def main(argv=None):
     d.add_argument("-o", "--out", required=True)
     d.set_defaults(fn=cmd_dump)
 
+    from . import cxx
+    cxx.add_parser(sub)
+
     args = ap.parse_args(argv)
     args.fn(args)
 
