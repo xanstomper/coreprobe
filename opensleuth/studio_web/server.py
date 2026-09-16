@@ -630,9 +630,16 @@ class Handler(BaseHTTPRequestHandler):
             log("acquire task complete")
 
 
-def main():
-    print(f"opensleuth web studio: http://0.0.0.0:{PORT}")
-    HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+def main(argv=None):
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="opensleuth.studio_web")
+    ap.add_argument("--host", default=os.environ.get("OPENSLEUTH_HOST", "127.0.0.1"),
+                    help="bind address (default 127.0.0.1 - loopback only; "
+                         "use 0.0.0.0 only on a trusted network / tunnel)")
+    args = ap.parse_args(argv)
+    print(f"opensleuth web studio: http://{args.host}:{PORT}")
+    HTTPServer((args.host, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

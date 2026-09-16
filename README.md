@@ -25,7 +25,7 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | Backup index (`Manifest.db`) | Python `sqlite3` | ✅ |
 | Artifact parsers (SMS, contacts, calls, Safari, prefs) | Python stdlib | ✅ |
 | Timeline + HTML/CSV/JSON report | Python `html`/`csv`/`json` | ✅ |
-| Encrypted backup + keychain decryption | roadmap | ⏳ |
+| Encrypted backup + keychain decryption (`acquire --encrypted --password --unback`) | pyiosbackup | ✅ |
 | iCloud acquisition | roadmap | ⏳ |
 
 ## Install / requirements
@@ -93,7 +93,7 @@ python3 -m opensleuth dump    ~/cases/case1/backup/<UDID> -o ~/cases/case1/repor
   A8-A11 have checkm8/palera1n (PC-only) to 18.7.10. Nothing public on
   17.3.2+ for A14+, or 26.0.2+.
 - `checkm8` bootrom exploit only covers A7-A11 (BFU-partial possible there)
-- Keychain items require an **encrypted** backup + device passcode (roadmap)
+- Keychain items require an **encrypted** backup + device passcode (supported via `--unback`)
 - Deleted files are not recoverable from logical backups
 
 ## Capability planning (public vuln matrix, as of 2026)
@@ -304,3 +304,18 @@ Offscreen smoke test: `python3 tests/studio_smoke.py` (writes
 - [ ] Timeline geolocation + map view
 
 MIT license.
+## Field deployment
+
+One-command examiner install (apt deps, pyiosbackup/pymobiledevice3, optional checkm8 tooling and web studio service):
+
+```bash
+git clone https://github.com/xanstomper/coreprobe && cd coreprobe
+sudo ./install.sh --with-web-service
+# optional: sudo ./install.sh --with-checkm8-tools   (gaster/palera1n/irecovery)
+
+python3 -m opensleuth exposure --chip A13 --ios 26.6.1
+```
+
+The web studio binds **127.0.0.1 only** by default. To expose it (tunnel / LAN), set
+`OPENSLEUTH_HOST=0.0.0.0` explicitly. There is no built-in auth: never bind it to a
+public interface.
