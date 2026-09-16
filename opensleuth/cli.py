@@ -399,7 +399,11 @@ def cmd_acquire_bfu(args):
         print("  checkm8 output:", res["checkm8"]["outcome"][:300])
 
     # per-class expectations + optional payload-driven ramdisk extraction
-    from .bfu import render_expectations, run_ramdisk_extract
+    from .bfu import render_expectations, render_usbliter8_plan, run_ramdisk_extract
+    route = getattr(args, "route", "").lower()
+    if route == "usbliter8":
+        print()
+        print(render_usbliter8_plan(chip=res.get("checkm8", {}).get("chip", "?") or "?"))
     print()
     print(render_expectations(chip=res.get("checkm8", {}).get("chip", "?"),
                               ios=getattr(args, "ios", "") or ""))
@@ -1186,6 +1190,38 @@ def cmd_appcatalog_extract(args):
     print(f"{r['rows']:,} rows x {len(r['columns'])} cols -> {r['csv']}")
 
 
+def cmd_escrow_find(args):
+    from . import escrow
+    print(escrow.render_find(escrow.find_records(args.dir)))
+
+
+def cmd_escrow_describe(args):
+    from .escrow import KeybagError, describe, render_describe
+    try:
+        print(render_describe(describe(args.file)))
+    except KeybagError as exc:
+        print(f"escrow: {exc}")
+
+
+def cmd_escrow_unlock(args):
+    from .escrow import unlock_backup
+    r = unlock_backup(args.record, args.backup, args.out)
+    if r.get("error"):
+        print(f"escrow: {r['error']}")
+        if r.get("escrow"):
+            print(render_escrow_summary(r["escrow"]))
+        return
+    print("decrypted ->", r["decrypted"])
+    print(render_escrow_summary(r["escrow"]))
+
+
+def render_escrow_summary(esc):
+    lines = [f"  escrow {esc.get('type', '?')} keybag:"]
+    for c in esc.get("classes", []):
+        lines.append(f"    {'+' if c.get('usable_now') else '-'} {c.get('class')}")
+    return "\n".join(lines)
+
+
 def cmd_keybag_status(args):
     from .keybag import KeybagError, render_status
     try:
@@ -1238,6 +1274,7 @@ def main(argv=None):
     bfu.add_argument("--ramdisk", help="payload dir (iBSS/iBEC/ramdisk/devicetree/trustcache) to run the checkm8 BFU ramdisk pull after pwn")
     bfu.add_argument("--force", action="store_true", help="attempt checkm8 pwn even when no DFU/recovery state is detected")
     bfu.add_argument("--keys", action="store_true", help="capture the device AES keyset (gaster keys) from the pwned device")
+    bfu.add_argument("--route", choices=["usbliter8", ""], default="", help="show the usbliter8 BFU playbook for A12/A13")
     bfu.set_defaults(fn=cmd_acquire_bfu)
     c8 = acq_sub.add_parser("checkm8", help="zero-hardware bootrom route (A7-A11): gaster pwn -> palera1n/PongoOS -> FS + BFU-partial")
     c8.add_argument("--out", required=True)
@@ -1372,6 +1409,21 @@ def main(argv=None):
     ke = kb_sub.add_parser("escrow", help="extract keybags embedded in an iTunes escrow record (plist)")
     ke.add_argument("file")
     ke.set_defaults(fn=cmd_keybag_escrow)
+
+    from . import escrow
+    es = sub.add_parser("escrow", help="escrow/paired-computer acquisition (passcode-free path, works on ALL models)")
+    es_sub = es.add_subparsers(dest="esc", required=True)
+    esf = es_sub.add_parser("find", help="locate escrow records/backup keybags in case materials")
+    esf.add_argument("dir")
+    esf.set_defaults(fn=cmd_escrow_find)
+    esd = es_sub.add_parser("describe", help="classes + passcode material of an escrow record")
+    esd.add_argument("file")
+    esd.set_defaults(fn=cmd_escrow_describe)
+    esu = es_sub.add_parser("unlock", help="attempt encrypted-backup decryption with escrow material")
+    esu.add_argument("record")
+    esu.add_argument("backup")
+    esu.add_argument("--out", required=True)
+    esu.set_defaults(fn=cmd_escrow_unlock)
 
     args = ap.parse_args(argv)
     args.fn(args)

@@ -31,6 +31,8 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | BFU acquisition (`acquire bfu` - per-class expectations + checkm8 ramdisk pull) | Python + checkm8 tooling | ✅ |
 | BFU keybag analysis (`keybag status/escrow` - kbagic parser, per-class key presence) | Python stdlib | ✅ |
 | BFU AES keyset capture (`acquire bfu --keys` - gaster/ipwndfu from pwned device) | Python + checkm8 tooling | ✅ |
+| Escrow/paired-computer acquisition (`escrow find/describe/unlock` - passcode-free path, all models) | Python + pyiosbackup | ✅ |
+| usbliter8 BFU playbook (`acquire bfu --route usbliter8` - A12/A13 step-by-step) | Python | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |

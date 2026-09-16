@@ -172,6 +172,8 @@ STANCE_ROWS = [
     ("checkm8 hardware route (A7-A11)", "FULL", "FULL", "N/A", "N/A", "PART"),
     ("usbliter8 DFU route (A12/A13)", "RESEARCH", "PART", "N/A", "N/A", "PART"),
     ("BFU keybag + AES keyset analysis (A7-A11)", "FULL", "FULL", "N/A", "N/A", "PART"),
+    ("Escrow/paired-computer unlock (ALL models incl. A13/A18)", "PART", "FULL", "PART", "N/A", "PART"),
+    ("usbliter8 BFU playbook (A12/A13)", "FULL", "FULL", "N/A", "N/A", "PART"),
     ("BFU passcode bypass", "NONE", "FULL", "N/A", "FULL", "PART"),
     ("Cloud (iCloud) acquisition", "NONE", "FULL", "FULL", "N/A", "PART"),
     ("App artifact breadth (100+ apps)", "PART", "FULL", "FULL", "N/A", "PART"),

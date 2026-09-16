@@ -98,6 +98,79 @@ def render_expectations(chip: str = "?", ios: str = "?") -> str:
     return "\n".join(lines)
 
 
+def usbliter8_plan(chip: str = "A13") -> dict[str, Any]:
+    """Structured BFU playbook for A12/A13 via the usbliter8 DFU route.
+
+    Honest: iBoot control + ramdisk boot at BFU still does NOT give
+    passcode-gated classes (SEP wraps the user keybag). It gives keybags,
+    fs metadata, unprotected classes, iBoot env, and the escrow path
+    below. The SEP wall is stated explicitly.
+    """
+    from .matrix import USBLITER8_CHIPS
+    chip = (chip or "?").upper()
+    eligible = chip in USBLITER8_CHIPS
+    steps = [
+        {"n": 1, "phase": "prepare",
+         "cmd": "flash usbliter8 firmware to RP2350 board (Pico 2 / Waveshare RP2350 USB-A)",
+         "expect": "UF2 flashed; board enumerates as the iBooter", "hw": True},
+        {"n": 2, "phase": "dfu",
+         "cmd": "enter DFU on the device (vol-down+power method; not via LLB)",
+         "expect": "device state = DFU (check: opensleuth acquire probe / lsusb 05ac:1227)",
+         "hw": True},
+        {"n": 3, "phase": "pwn",
+         "cmd": "plug device into the RP2350 board, wait for LED; replug to PC",
+         "expect": "USB serial ends 'PWND:[usbliter8]' (verify: opensleuth acquire usbliter8 --out <case>)",
+         "hw": True},
+        {"n": 4, "phase": "control",
+         "cmd": "usbliter8ctl boot <raw-iBoot> OR usbliter8ctl demote",
+         "expect": "iBoot command control from host; env readable (irecovery -c getenv)",
+         "hw": True},
+        {"n": 5, "phase": "ramdisk",
+         "cmd": ("usbliter8ra1n: boot SSH ramdisk (kernel/ramdisk/trustcache from "
+                 "your IPSW, trees signed per-device)"),
+         "expect": "SSH on 127.0.0.1:2222; mount data volume", "hw": True},
+        {"n": 6, "phase": "bfu-pull",
+         "cmd": ("pull: /var/Keychains/*.kb (system/user keybags), fs metadata, "
+                 "unprotected classes, iBoot env, nonce"),
+         "expect": "keybags + metadata captured; Complete* content stays encrypted",
+         "hw": True},
+        {"n": 7, "phase": "escrow",
+         "cmd": "analyze escrow records from paired computers (opensleuth escrow describe/find)",
+         "expect": "passcode-free backup unlock coverage on covered classes", "hw": False},
+    ]
+    return {
+        "chip": chip,
+        "eligible": eligible,
+        "route": "usbliter8" if eligible else f"NOT ELIGIBLE ({chip})",
+        "steps": steps,
+        "sep_wall": ("SEP still enforces passcode gating: user-class keys are "
+                     "created at first unlock and wrapped in the SEP. No open "
+                     "route obtains them at BFU on A12+."),
+    }
+
+
+def render_usbliter8_plan(chip: str = "A13") -> str:
+    p = usbliter8_plan(chip)
+    lines = [
+        f"usbliter8 BFU playbook: chip {p['chip']}  route: {p['route']}",
+        "",
+    ]
+    if not p["eligible"]:
+        lines.append("This chip has no public usbliter8 route (A14+).")
+        lines.append("Escrow/paired-computer is the only passcode-free path:")
+        lines.append("  opensleuth escrow find <case-dir>")
+        lines.append("  opensleuth escrow describe <record>")
+        lines.append("  opensleuth escrow unlock <record> <backup-dir> --out <dir>")
+        return "\n".join(lines)
+    for s in p["steps"]:
+        hw = " [HW-RIG]" if s["hw"] else ""
+        lines.append(f"{s['n']}. [{s['phase']}]{hw} {s['cmd']}")
+        lines.append(f"     expect: {s['expect']}")
+    lines.append("")
+    lines.append(f"SEP wall: {p['sep_wall']}")
+    return "\n".join(lines)
+
+
 # Ramdisk extraction path (checkm8-eligible devices, payloads provided) ------
 # Payloads dir layout (standard for this flow):
 #   iBSS, iBEC, ramdisk (img4), devicetree, trustcache
