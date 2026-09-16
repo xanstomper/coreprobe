@@ -1432,6 +1432,69 @@ def cmd_doctor(args):
     print(doctor.render(d, json_out=getattr(args, "json", False)))
 
 
+def cmd_firmware_identify(args):
+    from . import firmware
+    i = firmware.identify(args.file)
+    print(f"{i.get('path')}  [{i.get('kind')}]  {i.get('size', 0):,} B  magic={i.get('magic')}")
+
+
+def cmd_firmware_scan(args):
+    from . import firmware
+    print(firmware.render_scan(firmware.scan_dir(args.dir)))
+
+
+def cmd_firmware_img4(args):
+    from . import firmware
+    try:
+        info = firmware.parse_img4_file(args.file)
+    except ValueError as exc:
+        print(f"img4: {exc}")
+        return
+    print(firmware.render_im4p(info))
+
+
+def cmd_firmware_extract(args):
+    from . import firmware
+    try:
+        r = firmware.extract_ipsw(args.ipsw, args.out)
+    except ValueError as exc:
+        print(f"extract: {exc}")
+        return
+    print(f"ipsw: {r['ipsw']} - {r['files']} files -> {r['out']}")
+    print(firmware.render_scan(r["images"]))
+
+
+def cmd_trustcache_build(args):
+    from . import trustcache
+    hashes = [bytes.fromhex(h) for h in args.hashes]
+    if args.from_file:
+        hashes += [bytes.fromhex(line.strip()) for line in
+                   open(args.from_file) if line.strip()]
+    if not hashes:
+        print("trustcache: provide --hashes or --from-file")
+        return
+    n = trustcache.build_file(hashes, args.out)
+    print(f"trustcache: {n} entries -> {args.out}")
+
+
+def cmd_trustcache_parse(args):
+    from . import trustcache
+    try:
+        t = trustcache.parse_file(args.file)
+    except ValueError as exc:
+        print(f"trustcache: {exc}")
+        return
+    print(f"trustcache {args.file}: v{t['version']} count={t['count']} "
+          f"uuid={t['uuid'][:12]}... flags={t['flags']}")
+    for e in t["entries"][:20]:
+        print(f"  {e['cdhash']}  flags={e['flags']}")
+
+
+def cmd_patches(args):
+    from . import research_patches
+    print(research_patches.render_list(getattr(args, "target", "") or ""))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1676,6 +1739,40 @@ def main(argv=None):
     ess.add_argument("dir")
     ess.add_argument("--out", required=True)
     ess.set_defaults(fn=cmd_escrow_sweep)
+
+    from . import firmware as _fw
+    fw = sub.add_parser("firmware", help="firmware research toolbox: identify images, parse IMG4/IM4P, extract IPSW")
+    fw_sub = fw.add_subparsers(dest="fw", required=True)
+    fwi = fw_sub.add_parser("identify", help="classify a firmware image file by magic")
+    fwi.add_argument("file")
+    fwi.set_defaults(fn=cmd_firmware_identify)
+    fws = fw_sub.add_parser("scan", help="classify every image under a directory")
+    fws.add_argument("dir")
+    fws.set_defaults(fn=cmd_firmware_scan)
+    fwp = fw_sub.add_parser("img4", help="parse an IMG4/IM4P container")
+    fwp.add_argument("file")
+    fwp.set_defaults(fn=cmd_firmware_img4)
+    fwx = fw_sub.add_parser("extract", help="extract an IPSW (zip) and classify its images")
+    fwx.add_argument("ipsw")
+    fwx.add_argument("--out", required=True)
+    fwx.set_defaults(fn=cmd_firmware_extract)
+
+    from . import trustcache as _tc
+    tc = sub.add_parser("trustcache", help="trustcache build/parse (unsigned-code whitelist for research devices)")
+    tc_sub = tc.add_subparsers(dest="tc", required=True)
+    tcb = tc_sub.add_parser("build", help="build a trustcache from 20-byte CD hashes (hex, one per arg or file)")
+    tcb.add_argument("--hashes", nargs="*", default=[], help="hex cdhashes")
+    tcb.add_argument("--from-file", help="file with one hex hash per line")
+    tcb.add_argument("--out", required=True)
+    tcb.set_defaults(fn=cmd_trustcache_build)
+    tcp = tc_sub.add_parser("parse", help="parse a trustcache file")
+    tcp.add_argument("file")
+    tcp.set_defaults(fn=cmd_trustcache_parse)
+
+    from . import research_patches as _rp
+    rp = sub.add_parser("patches", help="public research patch catalog (documented modification points, research devices)")
+    rp.add_argument("--target", default="", choices=["kernel", "sptm", "sep", "iboot", "kernel/userspace", ""])
+    rp.set_defaults(fn=cmd_patches)
 
     args = ap.parse_args(argv)
     args.fn(args)

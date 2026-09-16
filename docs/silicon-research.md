@@ -30,6 +30,21 @@ SEP, so this stack is the recovery end of the A7-A11 + escrow flows and a
 target for the fuzz research. Validate against a real device fixture
 before case work (Apple does not publish the format).
 
+## Exploit-development toolbox (the ingredients for new-chip work)
+```
+firmware scan <dir> / identify <file>   -> image classification (IMG4/Mach-O)
+firmware img4 <file>                    -> IM4P container parse (type/desc/key/cert)
+firmware extract <ipsw> --out <dir>     -> IPSW extraction + classification
+trustcache build --hashes ... --out t  -> CD-hash whitelist (research boot)
+trustcache parse <file>                 -> inspect an existing trustcache
+patches [--target kernel|sep|iboot|sptm] -> documented patch-point catalog
+```
+These are the real artifacts exploit development consumes: firmware
+images to patch, trustcaches to whitelist payloads, and an honest
+inventory of the documented patch classes (AMFI bypass, KTRR wipe,
+iBoot sig NOP, SPTM bypass, Blackbird SEP ops). Combined with the DFU
+workbench they form a complete open-source development loop.
+
 ## Research workbench (the "make ours" pipeline)
 ```
 dfu-usbmon.sh  -> usbmon text capture
