@@ -1657,6 +1657,50 @@ def cmd_knowledgec(args):
     print(knowledgec.render(rows))
 
 
+def cmd_sepos_info(args):
+    from . import sepos
+    try:
+        print(sepos.render(sepos.extract_sep_image(args.file)))
+    except (ValueError, OSError) as exc:
+        print(f"sepos: {exc}")
+
+
+def cmd_sepos_diff(args):
+    from . import sepos
+    try:
+        older = sepos.extract_sep_image(args.older)
+        newer = sepos.extract_sep_image(args.newer)
+    except (ValueError, OSError) as exc:
+        print(f"sepos diff: {exc}")
+        return
+    print(f"older: {args.older}")
+    print(f"newer: {args.newer}")
+    print(sepos.render_diff(sepos.diff_builds(older, newer)))
+
+
+def cmd_passattack(args):
+    from . import passattack
+    print(passattack.render(passattack.model(args.space, days=args.days)))
+    print()
+    print(passattack.render_targets())
+
+
+def cmd_fi_targets(args):
+    from . import faultinjection as fi
+    print(fi.render_targets())
+
+
+def cmd_fi_equipment(args):
+    from . import faultinjection as fi
+    print(fi.render_equipment())
+
+
+def cmd_fi_plan(args):
+    from . import faultinjection as fi
+    t = next(t for t in fi.TARGET_MOMENTS if t["id"] == args.target_id)
+    print(fi.render_plan(fi.default_plan(args.target_id), t))
+
+
 def cmd_surface(args):
     from . import surface
     from .exploits import RECENT_DISCLOSURES
@@ -1983,6 +2027,31 @@ def main(argv=None):
 
     sf = sub.add_parser("surface", help="attack-surface analysis: rank tracked CVEs into research targets (honest)")
     sf.set_defaults(fn=cmd_surface)
+
+    sp_ = sub.add_parser("sepos", help="SEP firmware analyzer: sep-firmware.im4p TLV inventory + build diffs (path 1: SEP research)")
+    sp_sub = sp_.add_subparsers(dest="sp", required=True)
+    spi = sp_sub.add_parser("info", help="inventory a sep-firmware.im4p")
+    spi.add_argument("file")
+    spi.set_defaults(fn=cmd_sepos_info)
+    spd = sp_sub.add_parser("diff", help="diff two SEP builds (older newer)")
+    spd.add_argument("older")
+    spd.add_argument("newer")
+    spd.set_defaults(fn=cmd_sepos_diff)
+
+    pa = sub.add_parser("passattack", help="BFU passcode attack model: keyspace vs SEP attempt budget (path 2) + counter-bypass research targets")
+    pa.add_argument("--space", default="6-digit", choices=list(SPACES) if (SPACES := __import__("opensleuth.passattack", fromlist=["SPACES"]).SPACES) else [])
+    pa.add_argument("--days", type=int, default=30)
+    pa.set_defaults(fn=cmd_passattack)
+
+    fi = sub.add_parser("faultinjection", help="FI research planner: SEP target moments, equipment tiers, glitch plans (path 3)")
+    fi_sub = fi.add_subparsers(dest="fi", required=True)
+    fit = fi_sub.add_parser("targets", help="list FI target moments")
+    fit.set_defaults(fn=cmd_fi_targets)
+    fie = fi_sub.add_parser("equipment", help="equipment tiers")
+    fie.set_defaults(fn=cmd_fi_equipment)
+    fip = fi_sub.add_parser("plan", help="default glitch plan for a target")
+    fip.add_argument("target_id", choices=[t["id"] for t in __import__("opensleuth.faultinjection", fromlist=["TARGET_MOMENTS"]).TARGET_MOMENTS])
+    fip.set_defaults(fn=cmd_fi_plan)
 
     cl = sub.add_parser("crashlogs", help="parse CrashReporter .ips logs from a pull/backup")
     cl.add_argument("dir", help="root to scan (rglob *.ips)")

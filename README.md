@@ -24,6 +24,7 @@
 | [docs/COURT-GUIDE.md](docs/COURT-GUIDE.md) | Chain of custody: certify, verify, evidence handling |
 | [docs/UI-GUIDE.md](docs/UI-GUIDE.md) | Web studio + desktop app: every page and control |
 | [docs/roadmap-gaps.md](docs/roadmap-gaps.md) | The two hard walls (A12+ SEP, DPA) and what would move them |
+| [docs/A12-PLUS-BFU-PATHS.md](docs/A12-PLUS-BFU-PATHS.md) | **The three buildable paths**: SEPOS research, counter bypass model, fault injection |
 | [docs/silicon-research.md](docs/silicon-research.md) | Silicon envelope + exploit-dev toolbox |
 
 ## Quick start
