@@ -806,6 +806,8 @@ async function pageTools() {
   try { tdata = await api("/api/tools"); } catch { tdata = null; }
   let stance = null;
   try { stance = await api("/api/stance"); } catch { stance = null; }
+  let bfu = null;
+  try { bfu = await api("/api/bfu?chip=" + encodeURIComponent((DEVICE && DEVICE.chip) || "A13") + "&ios=" + encodeURIComponent((DEVICE && DEVICE.ios) || "")); } catch { bfu = null; }
   const tools = (tdata && tdata.tools) || [];
   const sum = (tdata && tdata.summary) || {};
   const installed = tools.filter(t => t.installed).length;
@@ -837,6 +839,26 @@ async function pageTools() {
     </tbody></table>
     <div class="log-event"><span class="dot ${installed ? "green" : "amber"}"></span><div class="log-text">Install the missing chain: <span class="mono">sudo ./install.sh --with-checkm8-tools</span> plus apt/pip per tool. Parsing layer (iLEAPP/MEAT/APOLLO/ArtEx/MVT) is optional per-case.</div></div>
     </div>
+    ${bfu ? `<!-- BFU panel -->
+    <div style="height:14px"></div>
+    <div class="panel-card"><div class="panel-card-head">BFU for modern devices (${esc(bfu.playbook.chip)})</div>
+    ${bfu.playbook.eligible
+      ? `<div class="log-event"><span class="dot green"></span><div class="log-text">usbliter8 route is public for this chip. Playbook:</div></div>
+         <table class="data"><thead><tr><th>#</th><th>Phase</th><th>Action</th><th>Expect</th></tr></thead><tbody>
+         ${bfu.playbook.steps.map(st => `<tr><td>${st.n}</td><td><span class="status-pill">${st.phase}</span></td><td>${esc(st.cmd)}</td><td>${esc(st.expect)}</td></tr>`).join("")}
+         </tbody></table>`
+      : `<div class="log-event"><span class="dot amber"></span><div class="log-text">No public bootrom route for ${esc(bfu.playbook.chip)}. Escrow/paired-computer is the passcode-free path (panel below).</div></div>`}
+    <div class="log-event"><span class="dot amber"></span><div class="log-text">SEP wall: ${esc(bfu.playbook.sep_wall)}</div></div>
+    <div class="filter-bar" style="margin-top:10px">
+      <span class="mono" style="color:#5d6470">escrow find:</span>
+      <input class="form-input" id="escrow-path" placeholder="e.g. /home/jewboy420/cases" style="width:300px" value="${esc((window._lastEscrowPath) || "")}">
+      <button class="btn" onclick="runEscrowFind()">Find escrow records</button>
+      <span class="mono" style="color:#5d6470;margin-left:12px">keybag:</span>
+      <input class="form-input" id="keybag-path" placeholder="path to systembag.kb" style="width:260px" value="">
+      <button class="btn" onclick="runKeybagStatus()">Keybag status</button>
+    </div>
+    <div id="bfu-results" class="log-event" style="display:none;margin-top:8px"><div class="log-body" id="bfu-results-body"></div></div>
+    </div>` : ""}
     ${stance ? `<!-- honest stance vs commercial platforms -->
     <div style="height:14px"></div>
     <div class="panel-card"><div class="panel-card-head">Honest stance vs commercial platforms</div>
@@ -897,3 +919,31 @@ async function refreshAll() {
 
 refreshAll();
 setInterval(refreshAll, 8000);
+
+/* BFU panel helpers */
+async function runEscrowFind() {
+  const p = document.getElementById("escrow-path");
+  const body = document.getElementById("bfu-results-body");
+  const wrap = document.getElementById("bfu-results");
+  const path = (p && p.value || "").trim();
+  if (!path) { if (wrap) { wrap.style.display = "block"; body.innerHTML = '<span class="mono">enter a directory path first</span>'; } return; }
+  if (window._lastEscrowPath !== path) window._lastEscrowPath = path;
+  const r = await api("/api/escrow?dir=" + encodeURIComponent(path));
+  const found = (r && r.found) || [];
+  body.innerHTML = found.length
+    ? found.map(f => `<div class="mono">${esc(f.path)} - ${f.keybags.map(b => `${b.type} keybag (${b.classes.filter(c => c.usable_now).length} usable)`) .join(", ") || "raw keybag"}</div>`).join("")
+    : '<span class="mono">no escrow/backup keybags found under this path</span>';
+  wrap.style.display = "block";
+}
+async function runKeybagStatus() {
+  const p = document.getElementById("keybag-path");
+  const body = document.getElementById("bfu-results-body");
+  const wrap = document.getElementById("bfu-results");
+  const path = (p && p.value || "").trim();
+  if (!path) { if (wrap) { wrap.style.display = "block"; body.innerHTML = '<span class="mono">enter a keybag file path first</span>'; } return; }
+  const r = await api("/api/keybag?file=" + encodeURIComponent(path));
+  body.innerHTML = (r && r.ok)
+    ? '<pre class="mono" style="white-space:pre-wrap;font-size:11px;line-height:1.5">' + esc(r.text) + "</pre>"
+    : '<span class="mono">' + esc((r && r.error) || "failed") + "</span>";
+  wrap.style.display = "block";
+}

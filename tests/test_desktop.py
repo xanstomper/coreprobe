@@ -105,8 +105,52 @@ class DesktopShellTest(unittest.TestCase):
             d = json.loads(r.read().decode())
         self.assertIn("tools", d)
         self.assertIn("summary", d)
-        self.assertGreaterEqual(len(d["tools"]), 20)
+        self.assertGreaterEqual(len(d["tools"]), 40)
         self.assertIn("installed", d["tools"][0])
+
+    def test_backend_bfu_api(self):
+        from urllib.request import urlopen
+        with urlopen(f"http://127.0.0.1:{self.port}/api/bfu?chip=A13", timeout=5) as r:
+            import json
+            d = json.loads(r.read().decode())
+        self.assertIn("expectations", d)
+        self.assertIn("playbook", d)
+        self.assertTrue(d["playbook"]["eligible"])
+        self.assertGreaterEqual(len(d["playbook"]["steps"]), 7)
+
+    def test_backend_escrow_api(self):
+        import tempfile
+        from pathlib import Path
+        from urllib.request import urlopen
+        # fixture record
+        import json
+        import plistlib
+        import struct
+        body = b"kbagic" + bytes([3, 2]) + bytes(16) + struct.pack("<I", 0)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg-escrow.plist"
+            p.write_bytes(plistlib.dumps({"EscrowRecords": [{"Keybag": body}]}))
+            with urlopen(f"http://127.0.0.1:{self.port}/api/escrow?dir={td}", timeout=5) as r:
+                d = json.loads(r.read().decode())
+        self.assertGreaterEqual(len(d["found"]), 1)
+        self.assertEqual(d["found"][0]["keybags"][0]["type"], "escrow")
+
+    def test_backend_keybag_api(self):
+        import json
+        import struct
+        import tempfile
+        from pathlib import Path
+        from urllib.request import urlopen
+        body = b"kbagic" + bytes([3, 0]) + bytes(16) + struct.pack("<I", 1)
+        body += bytes(range(16, 32)) + struct.pack("<I", 4) + struct.pack("<H", 1)
+        body += bytes([0, 4]) + struct.pack("<II", 0, 32) + b"\x01" * 32
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "systembag.kb"
+            f.write_bytes(body)
+            with urlopen(f"http://127.0.0.1:{self.port}/api/keybag?file={f}", timeout=5) as r:
+                d = json.loads(r.read().decode())
+        self.assertTrue(d["ok"])
+        self.assertIn("usable now", d["text"])
 
     def test_ensure_server_reuses_or_starts(self):
         studio_desktop.PORT = self.port
@@ -179,6 +223,18 @@ class DesktopShellTest(unittest.TestCase):
         html = self._page_html()
         self.assertNotIn("[object Promise]", html)
         self.assertIn("Routes", html)
+
+    def test_tools_page_includes_bfu_panel(self):
+        self.win.view.page().runJavaScript("location.hash = 'tools'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "BFU for modern devices"),
+            "BFU panel did not render on tools page")
+        html = self._page_html()
+        self.assertIn("SEP wall", html)
+        self.assertIn("escrow find", html.lower())
+        self.assertIn("keybag", html.lower())
 
     def test_nav_contains_tools(self):
         nav = {"html": ""}

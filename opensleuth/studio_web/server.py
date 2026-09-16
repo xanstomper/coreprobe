@@ -471,6 +471,36 @@ class Handler(BaseHTTPRequestHandler):
                 "rows": forensics.STANCE_ROWS,
                 "status_map": forensics._STATUS,
             }))
+        elif path == "/api/bfu":
+            qs = parse_qs(parsed.query)
+            from ..bfu import expectations, usbliter8_plan
+            chip = (qs.get("chip", [""])[0] or (_device() or {}).get("chip") or "A13").upper()
+            ios = qs.get("ios", [""])[0]
+            plan = usbliter8_plan(chip)
+            self._send(200, json.dumps({
+                "expectations": expectations(chip, ios),
+                "playbook": plan,
+            }, default=str))
+        elif path == "/api/escrow":
+            qs = parse_qs(parsed.query)
+            from .. import escrow
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            found = escrow.find_records(d)
+            self._send(200, json.dumps({"dir": d, "found": found}, default=str))
+        elif path == "/api/keybag":
+            qs = parse_qs(parsed.query)
+            from ..keybag import KeybagError, render_status
+            f = qs.get("file", [""])[0]
+            if not f:
+                self._send(400, b'{"error":"file required"}', "application/json")
+                return
+            try:
+                self._send(200, json.dumps({"ok": True, "text": render_status(f)}))
+            except (KeybagError, OSError) as exc:
+                self._send(200, json.dumps({"ok": False, "error": str(exc)}))
         elif path.startswith("/api/icon/"):
             bundle = unquote(path[len("/api/icon/"):])
             p = _icon(bundle)
