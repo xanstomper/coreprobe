@@ -48,6 +48,8 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | Crash-log parser (`crashlogs` - .ips metadata/exception/frames) | Python stdlib | ✅ |
 | Wireless artifacts (`wireless` - WiFi networks + Bluetooth paired/recent) | Python + plistlib | ✅ |
 | E2E case workflow test (extraction -> timeline -> certify -> verify -> tamper-detect) | pytest | ✅ |
+| Sysdiagnose analyzer (`sysdiagnose extract/inventory` - bundle extraction + high-value categorization) | Python + tarfile | ✅ |
+| knowledgeC behavior log (`knowledgec` - app focus, locks, notifications, pattern of life) | Python + sqlite3 | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |

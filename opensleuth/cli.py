@@ -5,6 +5,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import tarfile
 import sys
 import tempfile
 from pathlib import Path
@@ -1626,6 +1627,36 @@ def cmd_wireless(args):
     print(wireless.render(rows))
 
 
+def cmd_sysdiagnose_extract(args):
+    from . import sysdiagnose
+    try:
+        r = sysdiagnose.extract(args.tarball, args.out)
+    except (tarfile.TarError, OSError) as exc:
+        print(f"sysdiagnose: {exc}")
+        return
+    print(f"extracted {r['files']} files -> {r['out']}")
+    print(sysdiagnose.render_inventory(sysdiagnose.inventory(args.out)))
+
+
+def cmd_sysdiagnose_inventory(args):
+    from . import sysdiagnose
+    print(sysdiagnose.render_inventory(sysdiagnose.inventory(args.dir)))
+
+
+def cmd_knowledgec(args):
+    from . import knowledgec
+    p = Path(args.db_or_root)
+    if p.is_dir():
+        hits = knowledgec.find_knowledgec(p)
+        if not hits:
+            print("knowledgec: no knowledgeC.db found under", p)
+            return
+        print(f"found {len(hits)} knowledgeC db(s); using {hits[0]}")
+        p = hits[0]
+    rows = knowledgec.parse_knowledgec(p, limit=args.limit)
+    print(knowledgec.render(rows))
+
+
 def cmd_surface(args):
     from . import surface
     from .exploits import RECENT_DISCLOSURES
@@ -1962,6 +1993,21 @@ def main(argv=None):
     wl.add_argument("dir")
     wl.add_argument("--json", action="store_true")
     wl.set_defaults(fn=cmd_wireless)
+
+    sd = sub.add_parser("sysdiagnose", help="sysdiagnose bundle: extract tarball + inventory high-value evidence")
+    sd_sub = sd.add_subparsers(dest="sd", required=True)
+    sdx = sd_sub.add_parser("extract", help="extract a sysdiagnose .tar.gz")
+    sdx.add_argument("tarball")
+    sdx.add_argument("--out", required=True)
+    sdx.set_defaults(fn=cmd_sysdiagnose_extract)
+    sdi = sd_sub.add_parser("inventory", help="inventory an extracted sysdiagnose dir")
+    sdi.add_argument("dir")
+    sdi.set_defaults(fn=cmd_sysdiagnose_inventory)
+
+    kc = sub.add_parser("knowledgec", help="knowledgeC.db behavior log: app focus, locks, notifications (pattern of life)")
+    kc.add_argument("db_or_root", help="knowledgeC.db path OR a root to search for it")
+    kc.add_argument("--limit", type=int, default=100000)
+    kc.set_defaults(fn=cmd_knowledgec)
 
     args = ap.parse_args(argv)
     args.fn(args)
