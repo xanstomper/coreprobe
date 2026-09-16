@@ -25,6 +25,9 @@ const ICONS = {
   phone: I('<rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/>'),
   tablet: I('<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="10" y1="18" x2="14" y2="18"/>'),
   tools: I('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
+  research: I('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
+  bfu: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
+  evidence: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>'),
   exploits: I('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>'),
 };
 
@@ -34,7 +37,7 @@ const NAV = [
   ["browser", "Browser"], ["chats", "Chats"], ["cloud", "Cloud"], ["contacts", "Contacts"],
   ["calendars", "Calendars"], ["calls", "Calls"], ["location", "Location"], ["media", "Media"],
   ["messages", "Messages"], ["files", "Files"], ["forensics", "Forensics"], ["reports", "Reports"],
-  ["exploits", "Exploits"], ["tools", "Tools"], ["settings", "Settings"],
+  ["exploits", "Exploits"], ["research", "Research"], ["bfu", "BFU Lab"], ["evidence", "Evidence"], ["tools", "Tools"], ["settings", "Settings"],
 ];
 const SECTION_META = {
   devices: ["Devices", "Physical and logical device data"],
@@ -53,6 +56,9 @@ const SECTION_META = {
   reports: ["Reports", "Generated reports and exports"],
   exploits: ["Exploits", "Public iOS exploit catalog and exposure"],
   tools: ["Tools", "Open-source forensic toolchain + install status"],
+  research: ["Research", "Zero-day research: campaigns, DFU traces, leads, patch catalog"],
+  bfu: ["BFU Lab", "Modern-phone BFU: FS intelligence, keybags, decrypt engine"],
+  evidence: ["Evidence", "Chain of custody: certify, verify, integrity seals"],
   settings: ["Settings", "Configuration and preferences"],
 };
 
@@ -885,6 +891,7 @@ const PAGES = {
   calendars: pageCalendars, calls: pageCalls, location: pageLocation, media: pageMedia,
   messages: pageMessages, files: pageFiles, forensics: pageForensics, reports: pageReports,
   exploits: pageExploits, tools: pageTools, settings: pageSettings,
+  research: pageResearch, bfu: pageBfuLab, evidence: pageEvidence,
 };
 async function render() {
   const h = (location.hash || "#dashboard").slice(1);
@@ -990,4 +997,139 @@ async function runEscrowUnlock() {
     ? `<span class="status-pill green">DECRYPTED</span> <span class="mono">${esc(r.decrypted)}</span>`
     : `<span class="status-pill red">FAILED</span> <span class="mono">${esc((r && r.error) || "unknown error")}</span>`;
   wrap.style.display = "block";
+}
+
+/* ---------------- Research page ---------------- */
+let CAMPAIGN = null;
+async function pageResearch() {
+  try { CAMPAIGN = await api("/api/campaign"); } catch { CAMPAIGN = null; }
+  const camps = (CAMPAIGN && CAMPAIGN.campaigns) || {};
+  const leads = (CAMPAIGN && CAMPAIGN.leads) || [];
+  const campRows = Object.entries(camps).map(([id, c]) =>
+    `<tr><td class="mono">${esc(c.name)}</td><td>${esc(c.target)}</td><td>${esc(c.chip || "—")}</td>
+     <td class="mono">${esc(c.ios || "—")}</td><td class="mono">${c.sessions}</td><td class="mono">${c.leads || 0}</td></tr>`).join("")
+    || '<tr><td colspan="6">No campaigns yet.</td></tr>';
+  const leadRows = leads.slice().reverse().map(l => {
+    const cls = l.verdict === "finding" ? "red" : l.verdict === "escalated" || l.verdict === "promising" ? "amber" : "";
+    return `<tr><td class="mono">${esc(l.id)}</td><td>${esc(l.kind)}</td>
+      <td><span class="status-pill ${cls}">${esc(l.verdict)}</span></td>
+      <td>${esc(l.detail.slice(0, 90))}</td>
+      <td><button class="btn" onclick="triageLead('${esc(l.id)}','promising')">●</button>
+          <button class="btn" onclick="triageLead('${esc(l.id)}','dead-end')">·</button>
+          <button class="btn" onclick="triageLead('${esc(l.id)}','escalated')">▲</button></td></tr>`;
+  }).join("") || '<tr><td colspan="5">No leads yet - run a capture + dry session.</td></tr>';
+  return `<div class="page-head"><div class="page-title">Zero-Day Research</div>
+    <div class="page-sub">Campaign orchestrator: DFU captures -> traces -> fuzz sessions -> leads -> verdicts. Honest instrumentation: findings require reproduction + public writeup.</div></div>
+    <div class="panel-card"><div class="panel-card-head">Campaigns</div>
+    <div class="filter-bar">
+      <input class="form-input" id="cp-name" placeholder="campaign name" style="width:180px">
+      <input class="form-input" id="cp-chip" placeholder="chip (A13)" style="width:100px">
+      <input class="form-input" id="cp-ios" placeholder="iOS" style="width:90px">
+      <button class="btn" onclick="newCampaign()">New campaign</button>
+      <span class="mono" style="color:#5d6470;margin-left:10px">capture text:</span>
+      <input class="form-input" id="cp-capture-file" placeholder="usbmon capture (paste below)" style="width:260px">
+    </div>
+    <textarea id="cp-capture" class="notes-input" style="width:100%;height:110px;margin-top:8px" placeholder="Paste usbmon text (dfu-usbmon.sh output) here, then pick a campaign and Run dry session"></textarea>
+    <div class="filter-bar" style="margin-top:8px">
+      <select class="form-input" id="cp-select">${Object.keys(camps).map(id => `<option value="${esc(id)}">${esc(camps[id].name)}</option>`).join("") || '<option value="">(create one first)</option>'}</select>
+      <button class="btn" onclick="dryRun()">Run dry session</button>
+      <span class="mono" style="color:#5d6470">then: opensleuth campaign run &lt;id&gt; --capture f.txt (live fuzz)</span>
+    </div>
+    <table class="data"><thead><tr><th>Name</th><th>Target</th><th>Chip</th><th>iOS</th><th>Sessions</th><th>Leads</th></tr></thead>
+    <tbody>${campRows}</tbody></table></div>
+    <div style="height:14px"></div>
+    <div class="panel-card"><div class="panel-card-head">Leads (${leads.length})</div>
+    <table class="data"><thead><tr><th>ID</th><th>Kind</th><th>Verdict</th><th>Detail</th><th>Triage</th></tr></thead>
+    <tbody>${leadRows}</tbody></table>
+    <div class="log-event"><span class="dot amber"></span><div class="log-text">Ladder: observed → promising (repro) → escalated (root cause) → finding (public writeup). Nothing enters the exploit catalog without a public writeup.</div></div></div>`;
+}
+async function newCampaign() {
+  const name = document.getElementById("cp-name").value.trim();
+  if (!name) { toast("campaign name required", "red"); return; }
+  const r = await api("/api/campaign", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: "new", name, chip: document.getElementById("cp-chip").value,
+                          ios: document.getElementById("cp-ios").value, target: "DFU"})});
+  toast(r.ok ? "campaign created" : (r.error || "failed"), r.ok ? "green" : "red");
+  if (r.ok) render();
+}
+async function dryRun() {
+  const id = document.getElementById("cp-select").value;
+  const capture = document.getElementById("cp-capture").value;
+  if (!id || !capture.trim()) { toast("campaign + capture text required", "red"); return; }
+  const r = await api("/api/campaign", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: "dry-run", campaign_id: id, capture})});
+  toast(r.ok ? `session ${r.session.id}: ${r.anomalies.length} anomalies` : (r.error || "failed"), r.ok ? "green" : "red");
+  if (r.ok) render();
+}
+async function triageLead(id, verdict) {
+  const r = await api("/api/campaign", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: "triage", lead_id: id, verdict})});
+  toast(r.ok ? `${id} → ${verdict}` : (r.error || "failed"), r.ok ? "green" : "red");
+  if (r.ok) render();
+}
+
+/* ---------------- BFU Lab page ---------------- */
+async function pageBfuLab() {
+  return `<div class="page-head"><div class="page-title">BFU Lab (modern phones)</div>
+    <div class="page-sub">Works on ANY model: FS class intelligence, keybag analysis, our own decrypt engine.</div></div>
+    <div class="panel-card"><div class="panel-card-head">Filesystem intelligence (bfufs)</div>
+    <div class="filter-bar">
+      <input class="form-input" id="bfu-fs-path" placeholder="BFU-mounted or pulled root" style="width:320px">
+      <button class="btn" onclick="runBfuFs()">Scan classes</button>
+    </div>
+    <div id="bfu-fs-out" style="margin-top:8px"></div></div>
+    <div style="height:14px"></div>
+    <div class="panel-card"><div class="panel-card-head">Keybag tools</div>
+    <div class="filter-bar">
+      <input class="form-input" id="kb-file" placeholder="keybag / Manifest.plist" style="width:280px">
+      <button class="btn" onclick="runKeybagUI()">Keybag status</button>
+      <input class="form-input" id="escrow-dir" placeholder="case dir (escrow find)" style="width:220px">
+      <button class="btn" onclick="runEscrowFind()">Escrow find</button>
+    </div>
+    <div id="kb-out" style="margin-top:8px"></div></div>`;
+}
+async function runBfuFs() {
+  const p = document.getElementById("bfu-fs-path").value.trim();
+  const out = document.getElementById("bfu-fs-out");
+  if (!p) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  const r = await api("/api/bfufs?dir=" + encodeURIComponent(p));
+  const s = (r && r.summary) || {};
+  out.innerHTML = `
+    <div class="log-event"><span class="dot ${s.content_readable ? "green" : "amber"}"></span>
+    <div class="log-text"><b>${s.total_files || 0}</b> files · <b>${s.content_readable || 0}</b> plaintext-readable at BFU ·
+    <b>${s.metadata_visible || 0}</b> metadata-only · interest: ${esc(JSON.stringify(s.by_interest || {}))}</div></div>
+    ${(r.readable || []).slice(0, 25).map(f => `<div class="mono" style="padding-left:14px">+ ${esc(f.rel)}</div>`).join("")}
+    ${(r.targets || []).slice(0, 25).map(f => `<div class="mono" style="padding-left:14px;color:#9aa1ad">· ${esc(f.rel)} [${esc(f.interest || "—")}]</div>`).join("")}`;
+}
+async function runKeybagUI() {
+  const f = document.getElementById("kb-file").value.trim();
+  const out = document.getElementById("kb-out");
+  if (!f) { out.innerHTML = '<span class="mono">enter a keybag path</span>'; return; }
+  const r = await api("/api/keybag?file=" + encodeURIComponent(f));
+  out.innerHTML = (r && r.ok)
+    ? `<pre class="mono" style="white-space:pre-wrap;font-size:11px">${esc(r.text)}</pre>`
+    : `<span class="mono">${esc((r && r.error) || "failed")}</span>`;
+}
+
+/* ---------------- Evidence page ---------------- */
+async function pageEvidence() {
+  return `<div class="page-head"><div class="page-title">Evidence & Chain of Custody</div>
+    <div class="page-sub">Certify a case directory (native hashing + HMAC seal) and verify integrity.</div></div>
+    <div class="panel-card"><div class="panel-card-head">Verify a sealed report</div>
+    <div class="filter-bar">
+      <input class="form-input" id="cert-report" placeholder="sealed-report.json path" style="width:340px">
+      <button class="btn" onclick="runCertVerify()">Verify integrity</button>
+      <span class="mono" style="color:#5d6470">create: opensleuth certify &lt;case&gt; --out &lt;dir&gt; --examiner "Name"</span>
+    </div>
+    <div id="cert-out" style="margin-top:8px"></div></div>`;
+}
+async function runCertVerify() {
+  const f = document.getElementById("cert-report").value.trim();
+  const out = document.getElementById("cert-out");
+  if (!f) { out.innerHTML = '<span class="mono">enter a report path</span>'; return; }
+  const r = await api("/api/certify?verify=" + encodeURIComponent(f));
+  if (!r || r.error) { out.innerHTML = `<span class="mono">${esc((r && r.error) || "failed")}</span>`; return; }
+  out.innerHTML = `<div class="log-event"><span class="dot ${r.integrity_ok ? "green" : "red"}"></span>
+    <div class="log-text">seal ${r.seal_valid ? "VALID" : "INVALID"} · ${r.file_count} files · tampered ${r.tampered}
+    ${r.tampered ? r.failures.map(x => `<div class="mono">${esc(x.status)} ${esc(x.relpath)}</div>`).join("") : ""}</div></div>`;
 }

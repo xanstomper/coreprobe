@@ -528,6 +528,75 @@ class Handler(BaseHTTPRequestHandler):
                 return
             r = escrow.unlock_backup(rec, bk, out)
             self._send(200, json.dumps(r, default=str))
+        elif path == "/api/campaign":
+            from .. import campaign as C
+            from ..dfutrace import analyze, parse_usbmon_text
+            qs = parse_qs(parsed.query)
+            state = C.load()
+            if path.endswith("/campaign") and self.command == "POST":
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                if body.get("action") == "new":
+                    c = C.new_campaign(state, body.get("name", "unnamed"),
+                                       body.get("target", "DFU"),
+                                       chip=body.get("chip", ""),
+                                       ios=body.get("ios", ""))
+                    C.save(state)
+                    self._send(200, json.dumps({"ok": True, "campaign": c}))
+                    return
+                if body.get("action") == "triage":
+                    lead = C.triage_lead(state, body["lead_id"],
+                                         body["verdict"], notes=body.get("notes", ""))
+                    C.save(state)
+                    self._send(200, json.dumps({"ok": True, "lead": lead}))
+                    return
+                if body.get("action") == "dry-run":
+                    capture = body.get("capture", "")
+                    rep = analyze(parse_usbmon_text(capture))
+                    session = C.start_session(state, body.get("campaign_id", ""), kind="dry-analysis")
+                    C.finish_session(state, session["id"], {"iterations": 0})
+                    for anomaly in rep.get("anomalies", [])[:10]:
+                        C.add_lead(state, session["id"], "trace-anomaly", anomaly,
+                                   campaign_id=body.get("campaign_id", ""))
+                    C.save(state)
+                    self._send(200, json.dumps({"ok": True, "session": session,
+                                                "analysis": {"anomalies": rep["anomalies"],
+                                                             "dfu_requests": rep["dfu_requests"]}}))
+                    return
+                self._send(400, b'{"error":"unknown action"}', "application/json")
+                return
+            self._send(200, json.dumps(state, default=str))
+        elif path == "/api/bfufs":
+            qs = parse_qs(parsed.query)
+            from .. import bfufs
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            rows = bfufs.scan_fs(d)
+            rep = bfufs.classify(rows)
+            rep.pop("readable_now", None)
+            rep.pop("metadata_targets", None)
+            self._send(200, json.dumps({"summary": rep,
+                                        "readable": [r for r in rows if r["readable_now"]][:500],
+                                        "targets": [r for r in rows if r["metadata_only"]][:500]},
+                                       default=str))
+        elif path == "/api/certify":
+            qs = parse_qs(parsed.query)
+            from .. import certify
+            if qs.get("verify"):
+                v = certify.verify(qs["verify"][0])
+                self._send(200, json.dumps(v, default=str))
+                return
+            self._send(400, b'{"error":"verify=<report> required"}', "application/json")
+        elif path == "/api/firmware":
+            qs = parse_qs(parsed.query)
+            from .. import firmware
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            self._send(200, json.dumps({"images": firmware.scan_dir(d)}, default=str))
         elif path == "/api/doctor":
             from .. import doctor
             self._send(200, json.dumps(doctor.run(), default=str))
@@ -573,6 +642,37 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode()
         data = json.loads(body) if body else {}
+        if parsed.path == "/api/campaign":
+            from .. import campaign as C
+            state = C.load()
+            try:
+                if data.get("action") == "new":
+                    c = C.new_campaign(state, data.get("name", "unnamed"),
+                                       data.get("target", "DFU"),
+                                       chip=data.get("chip", ""), ios=data.get("ios", ""))
+                    C.save(state)
+                    self._send(200, json.dumps({"ok": True, "campaign": c}))
+                elif data.get("action") == "triage":
+                    lead = C.triage_lead(state, data["lead_id"], data["verdict"],
+                                         notes=data.get("notes", ""))
+                    C.save(state)
+                    self._send(200, json.dumps({"ok": True, "lead": lead}))
+                elif data.get("action") == "dry-run":
+                    from ..dfutrace import analyze, parse_usbmon_text
+                    rep = analyze(parse_usbmon_text(data.get("capture", "")))
+                    session = C.start_session(state, data.get("campaign_id", ""), kind="dry-analysis")
+                    C.finish_session(state, session["id"], {"iterations": 0})
+                    for anomaly in rep.get("anomalies", [])[:10]:
+                        C.add_lead(state, session["id"], "trace-anomaly", anomaly,
+                                   campaign_id=data.get("campaign_id", ""))
+                    C.save(state)
+                    self._send(200, json.dumps({"ok": True, "session": session,
+                                                "anomalies": rep["anomalies"]}))
+                else:
+                    self._send(400, b'{"error":"unknown action"}', "application/json")
+            except (KeyError, ValueError) as exc:
+                self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return
         if parsed.path == "/api/case":
             dest = Path(data.get("destination", str(Path.home() / "cases" / data.get("case_id", "default"))))
             dest.mkdir(parents=True, exist_ok=True)

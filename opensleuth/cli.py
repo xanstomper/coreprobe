@@ -1522,6 +1522,90 @@ def cmd_patches(args):
     print(research_patches.render_list(getattr(args, "target", "") or ""))
 
 
+def cmd_campaign_new(args):
+    from . import campaign
+    state = campaign.load()
+    c = campaign.new_campaign(state, args.name, args.target, chip=args.chip, ios=args.ios)
+    campaign.save(state)
+    print(f"campaign created: {c['id']}")
+    print(f"  target={c['target']} chip={c['chip'] or '?'} ios={c['ios'] or '?'}")
+    print("next: opensleuth campaign run <id> --capture <usbmon.txt> [--dry]")
+
+
+def cmd_campaign_status(args):
+    from . import campaign
+    print(campaign.render_status(campaign.load()))
+
+
+def cmd_campaign_run(args):
+    from . import campaign
+    from .dfutrace import analyze, parse_usbmon_text, render
+    state = campaign.load()
+    if args.campaign_id not in state["campaigns"]:
+        sys.exit(f"campaign not found: {args.campaign_id}")
+    capture = Path(args.capture).read_text(errors="replace")
+    if args.dry:
+        events = parse_usbmon_text(capture)
+        rep = analyze(events)
+        print(render(rep))
+        session = campaign.start_session(state, args.campaign_id, kind="dry-analysis")
+        campaign.finish_session(state, session["id"], {"iterations": 0})
+        for anomaly in rep.get("anomalies", [])[:10]:
+            campaign.add_lead(state, session["id"], "trace-anomaly", anomaly,
+                              campaign_id=args.campaign_id)
+        campaign.save(state)
+        print()
+        print("dry session recorded:", campaign.render_session(session))
+        return
+    # live fuzz needs a real DFU device via pyusb
+    try:
+        import usb.core  # noqa: F401
+    except ImportError:
+        sys.exit("live fuzz needs pyusb; use --dry for analysis-only")
+    class LiveDev:
+        def __init__(self):
+            import usb.core
+            self.dev = usb.core.find(idVendor=0x05AC)
+            if self.dev is None:
+                raise SystemExit("no Apple device in DFU/recovery (vid 0x05ac)")
+        def alive(self):
+            import usb.core
+            return usb.core.find(idVendor=0x05AC) is not None
+        def ctrl_transfer(self, *a, **k):
+            return self.dev.ctrl_transfer(*a, **k)
+    r = campaign.record_fuzz_run(state, args.campaign_id, capture,
+                                 LiveDev(), iterations=args.iterations)
+    campaign.save(state)
+    print(campaign.render_session(r["session"]))
+    if r.get("fuzz"):
+        print(f"  crashes={r['fuzz']['crashes']} hangups={r['fuzz']['hangups']} "
+              f"interesting={len(r['fuzz']['interesting'])}")
+
+
+def cmd_campaign_triage(args):
+    from . import campaign
+    state = campaign.load()
+    lead = campaign.triage_lead(state, args.lead_id, args.verdict, notes=args.notes)
+    campaign.save(state)
+    print(f"{lead['id']} -> {lead['verdict']}")
+    if lead["notes"]:
+        print(f"  notes: {lead['notes']}")
+
+
+def cmd_timeline(args):
+    import json
+    from . import timeline
+    data = json.loads(Path(args.input).read_text())
+    if isinstance(data, dict) and "artifacts" in data:
+        events = timeline.from_backup_artifacts(data["artifacts"])
+    else:
+        events = timeline.merge(data if isinstance(data, dict) else {})
+    print(timeline.render(events))
+    if args.out:
+        n = timeline.write_csv(events, args.out)
+        timeline.write_json(events, str(args.out).rsplit(".", 1)[0] + ".json")
+        print(f"\n{n} events -> {args.out} (+ .json)")
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1810,6 +1894,34 @@ def main(argv=None):
     bf.add_argument("dir", help="BFU-mounted or pulled filesystem root")
     bf.add_argument("--json", action="store_true")
     bf.set_defaults(fn=cmd_bfufs)
+
+    from . import campaign as _cpg
+    cg = sub.add_parser("campaign", help="zero-day research campaign: sessions, leads, triage (honest instrumentation)")
+    cg_sub = cg.add_subparsers(dest="cg", required=True)
+    cgn = cg_sub.add_parser("new", help="start a new research campaign")
+    cgn.add_argument("name")
+    cgn.add_argument("--target", default="DFU", help="attack surface (DFU, iBoot, ...)")
+    cgn.add_argument("--chip", default="", help="research device chip (e.g. A13)")
+    cgn.add_argument("--ios", default="")
+    cgn.set_defaults(fn=cmd_campaign_new)
+    cgs = cg_sub.add_parser("status", help="campaign status: sessions + leads + verdicts")
+    cgs.set_defaults(fn=cmd_campaign_status)
+    cgr = cg_sub.add_parser("run", help="run a fuzz session from a usbmon capture (live device or dry analysis)")
+    cgr.add_argument("campaign_id")
+    cgr.add_argument("--capture", required=True, help="usbmon text capture file")
+    cgr.add_argument("--iterations", type=int, default=200)
+    cgr.add_argument("--dry", action="store_true", help="analyze + corpus only (no device driving)")
+    cgr.set_defaults(fn=cmd_campaign_run)
+    cgt = cg_sub.add_parser("triage", help="set a lead verdict (observed|promising|dead-end|escalated|finding)")
+    cgt.add_argument("lead_id")
+    cgt.add_argument("verdict", choices=["observed", "promising", "dead-end", "escalated", "finding"])
+    cgt.add_argument("--notes", default="")
+    cgt.set_defaults(fn=cmd_campaign_triage)
+
+    tl = sub.add_parser("timeline", help="super-timeline: merge artifact sources into one chronology")
+    tl.add_argument("input", help="JSON file: {\"sms\": [...], \"calls\": [...]} or artifacts dump")
+    tl.add_argument("--out", help="output CSV path (also writes .json)")
+    tl.set_defaults(fn=cmd_timeline)
 
     args = ap.parse_args(argv)
     args.fn(args)

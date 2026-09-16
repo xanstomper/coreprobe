@@ -208,7 +208,7 @@ class DesktopShellTest(unittest.TestCase):
             self.assertTrue(url.startswith(f"http://127.0.0.1:{self.port}"))
         for key, _, _ in studio_desktop.NAV:
             self.assertIn(key, ("dashboard", "exploits", "reports", "devices",
-                                "settings", "tools"))
+                                "settings", "tools", "research", "bfu", "evidence"))
 
     # ----- real browser-engine rendering -----
     def _wait_for(self, script, needle, timeout=15.0):
@@ -279,6 +279,38 @@ class DesktopShellTest(unittest.TestCase):
         self.assertIn("SEP wall", html)
         self.assertIn("escrow find", html.lower())
         self.assertIn("keybag", html.lower())
+
+    def test_research_page_renders_in_browser(self):
+        self.win.view.page().runJavaScript("location.hash = 'research'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Zero-Day Research"),
+            "research page did not render")
+        html = self._page_html()
+        self.assertIn("Campaigns", html)
+        self.assertIn("Leads", html)
+
+    def test_bfu_lab_page_renders_in_browser(self):
+        self.win.view.page().runJavaScript("location.hash = 'bfu'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "BFU Lab"),
+            "bfu lab page did not render")
+        html = self._page_html()
+        self.assertIn("Filesystem intelligence", html)
+        self.assertIn("Keybag tools", html)
+
+    def test_evidence_page_renders_in_browser(self):
+        self.win.view.page().runJavaScript("location.hash = 'evidence'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Chain of Custody"),
+            "evidence page did not render")
+        html = self._page_html()
+        self.assertIn("Verify", html)
 
     def test_nav_contains_tools(self):
         nav = {"html": ""}

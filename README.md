@@ -41,6 +41,9 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | BFU decryption engine (`keybag unwrap`, `acquire bfu-decrypt` - cprotect + AES-CBC sector decrypt) | Python + pycryptodome | ✅ |
 | Exploit-dev toolbox (`firmware` identify/scan/img4/extract, `trustcache` build/parse, `patches` catalog) | Python stdlib + zipfile | ✅ |
 | Modern BFU FS intelligence (`bfufs` - per-class map, readable-now, interest map) + `keybag backupbag` | Python + xattr | ✅ |
+| Zero-day research campaign (`campaign new/run/status/triage` - sessions, leads, verdict ladder) | Python | ✅ |
+| Super-timeline (`timeline` - merged artifact chronology, CSV+JSON) | Python stdlib | ✅ |
+| Web UI: Research / BFU Lab / Evidence pages + desktop NAV (browser-tested) | JS + QtWebEngine | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |
