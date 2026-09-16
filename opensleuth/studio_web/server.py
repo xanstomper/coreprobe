@@ -501,6 +501,35 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"ok": True, "text": render_status(f)}))
             except (KeybagError, OSError) as exc:
                 self._send(200, json.dumps({"ok": False, "error": str(exc)}))
+        elif path == "/api/appcatalog":
+            qs = parse_qs(parsed.query)
+            from .. import appcatalog
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            dbs = appcatalog.find_dbs(Path(d))
+            inv = []
+            for db in dbs:
+                i = appcatalog.inventory(Path(db["path"]))
+                if i:
+                    inv.append({**db, **i})
+            self._send(200, json.dumps({"dir": d, "count": len(inv), "databases": inv},
+                                       default=str))
+        elif path == "/api/escrow/unlock":
+            qs = parse_qs(parsed.query)
+            from .. import escrow
+            rec = qs.get("record", [""])[0]
+            bk = qs.get("backup", [""])[0]
+            out = qs.get("out", [""])[0]
+            if not (rec and bk and out):
+                self._send(400, b'{"error":"record, backup and out required"}', "application/json")
+                return
+            r = escrow.unlock_backup(rec, bk, out)
+            self._send(200, json.dumps(r, default=str))
+        elif path == "/api/doctor":
+            from .. import doctor
+            self._send(200, json.dumps(doctor.run(), default=str))
         elif path.startswith("/api/icon/"):
             bundle = unquote(path[len("/api/icon/"):])
             p = _icon(bundle)

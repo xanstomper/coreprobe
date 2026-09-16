@@ -158,6 +158,7 @@ def run(state_path: Path = DEFAULT_STATE_PATH, timeout: int = 30) -> dict:
         "total_tracked_cves": len(state.get("seen_cves", [])),
         "delta": len(state.get("seen_cves", [])) - before,
         "state_path": str(state_path),
+        "last_check": state.get("last_check"),
     }
 
 

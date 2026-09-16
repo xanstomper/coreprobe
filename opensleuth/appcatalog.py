@@ -178,8 +178,9 @@ def match_app(db_rel: str) -> str | None:
     return None
 
 
-def find_dbs(root: Path) -> list[dict[str, Any]]:
+def find_dbs(root: Path | str) -> list[dict[str, Any]]:
     """Crawl a container/image dir for SQLite-family databases."""
+    root = Path(root)
     out = []
     if not root.exists():
         return out

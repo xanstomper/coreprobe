@@ -858,6 +858,17 @@ async function pageTools() {
       <button class="btn" onclick="runKeybagStatus()">Keybag status</button>
     </div>
     <div id="bfu-results" class="log-event" style="display:none;margin-top:8px"><div class="log-body" id="bfu-results-body"></div></div>
+    <div class="filter-bar" style="margin-top:10px">
+      <span class="mono" style="color:#5d6470">app DBs:</span>
+      <input class="form-input" id="appcat-path" placeholder="extracted container dir" style="width:300px" value="">
+      <button class="btn" onclick="runAppCatalog()">Discover app databases</button>
+      <span class="mono" style="color:#5d6470;margin-left:12px">escrow unlock:</span>
+      <input class="form-input" id="escrow-record" placeholder="escrow record" style="width:180px" value="">
+      <input class="form-input" id="escrow-backup" placeholder="backup dir" style="width:160px" value="">
+      <input class="form-input" id="escrow-out" placeholder="out dir" style="width:140px" value="">
+      <button class="btn" onclick="runEscrowUnlock()">Unlock backup</button>
+    </div>
+    <div id="bfu-results" class="log-event" style="display:none;margin-top:8px"><div class="log-body" id="bfu-results-body2"></div></div>
     </div>` : ""}
     ${stance ? `<!-- honest stance vs commercial platforms -->
     <div style="height:14px"></div>
@@ -945,5 +956,38 @@ async function runKeybagStatus() {
   body.innerHTML = (r && r.ok)
     ? '<pre class="mono" style="white-space:pre-wrap;font-size:11px;line-height:1.5">' + esc(r.text) + "</pre>"
     : '<span class="mono">' + esc((r && r.error) || "failed") + "</span>";
+  wrap.style.display = "block";
+}
+
+/* App DB discovery + escrow unlock (Tools page) */
+async function runAppCatalog() {
+  const p = document.getElementById("appcat-path");
+  const body = document.getElementById("bfu-results-body2");
+  const wrap = document.getElementById("bfu-results");
+  const path = (p && p.value || "").trim();
+  if (!path) { wrap.style.display = "block"; body.innerHTML = '<span class="mono">enter a container dir path first</span>'; return; }
+  const r = await api("/api/appcatalog?dir=" + encodeURIComponent(path));
+  const dbs = (r && r.databases) || [];
+  body.innerHTML = dbs.length
+    ? `<span class="mono">${dbs.length} database(s) found:</span>` + dbs.map(db =>
+      `<div class="mono" style="margin-top:4px">${esc(db.rel)}${db.app ? ` <span class="status-pill green">${esc(db.app)}</span>` : ""}
+       ${db.tables.map(t => `<div style="margin-left:18px;color:#9aa1ad">${t.rows} rows  ${esc(t.table)}  cols: ${esc((t.columns||[]).slice(0,6).join(", "))}${(t.columns||[]).length > 6 ? "…" : ""}</div>`).join("")}</div>`).join("")
+    : '<span class="mono">no databases found under this path</span>';
+  wrap.style.display = "block";
+}
+async function runEscrowUnlock() {
+  const rec = document.getElementById("escrow-record");
+  const bk = document.getElementById("escrow-backup");
+  const out = document.getElementById("escrow-out");
+  const body = document.getElementById("bfu-results-body2");
+  const wrap = document.getElementById("bfu-results");
+  if (!(rec && rec.value && bk && bk.value && out && out.value)) {
+    wrap.style.display = "block"; body.innerHTML = '<span class="mono">record, backup, and out paths are all required</span>'; return;
+  }
+  const q = "record=" + encodeURIComponent(rec.value.trim()) + "&backup=" + encodeURIComponent(bk.value.trim()) + "&out=" + encodeURIComponent(out.value.trim());
+  const r = await api("/api/escrow/unlock?" + q);
+  body.innerHTML = r && r.ok
+    ? `<span class="status-pill green">DECRYPTED</span> <span class="mono">${esc(r.decrypted)}</span>`
+    : `<span class="status-pill red">FAILED</span> <span class="mono">${esc((r && r.error) || "unknown error")}</span>`;
   wrap.style.display = "block";
 }

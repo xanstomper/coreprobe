@@ -152,6 +152,50 @@ class DesktopShellTest(unittest.TestCase):
         self.assertTrue(d["ok"])
         self.assertIn("usable now", d["text"])
 
+    def test_backend_appcatalog_api(self):
+        import json
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+        from urllib.request import urlopen
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "net.whatsapp.WhatsApp/Library/Application Support/chatstorage.sqlite"
+            db.parent.mkdir(parents=True)
+            con = sqlite3.connect(db)
+            con.execute("CREATE TABLE ZWAMESSAGE (ZTEXT TEXT)")
+            con.commit()
+            con.close()
+            with urlopen(f"http://127.0.0.1:{self.port}/api/appcatalog?dir={td}", timeout=5) as r:
+                d = json.loads(r.read().decode())
+        self.assertEqual(d["count"], 1)
+        self.assertEqual(d["databases"][0]["app"], "WhatsApp")
+        self.assertIn("ZWAMESSAGE", str(d["databases"][0]["tables"]))
+
+    def test_backend_doctor_api(self):
+        from urllib.request import urlopen
+        with urlopen(f"http://127.0.0.1:{self.port}/api/doctor", timeout=20) as r:
+            import json
+            d = json.loads(r.read().decode())
+        self.assertIn("checks", d)
+        self.assertGreaterEqual(d["total"], 10)
+
+    def test_backend_escrow_unlock_api(self):
+        import json
+        import plistlib
+        import struct
+        import tempfile
+        from pathlib import Path
+        from urllib.request import urlopen
+        body = b"kbagic" + bytes([3, 2]) + bytes(16) + struct.pack("<I", 0)
+        with tempfile.TemporaryDirectory() as td:
+            rec = Path(td) / "rec.plist"
+            rec.write_bytes(plistlib.dumps({"EscrowRecords": [{"Keybag": body}]}))
+            with urlopen(f"http://127.0.0.1:{self.port}/api/escrow/unlock"
+                         f"?record={rec}&backup={td}&out={td}/o", timeout=5) as r:
+                d = json.loads(r.read().decode())
+        self.assertFalse(d["ok"])
+        self.assertIn("no passcode material", d["error"].lower())
+
     def test_ensure_server_reuses_or_starts(self):
         studio_desktop.PORT = self.port
         self.assertEqual(studio_desktop.ensure_server(), self.port)

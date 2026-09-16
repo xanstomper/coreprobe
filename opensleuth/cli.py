@@ -1238,6 +1238,12 @@ def cmd_keybag_escrow(args):
         print(f"escrow: {exc}")
 
 
+def cmd_doctor(args):
+    from . import doctor
+    d = doctor.run()
+    print(doctor.render(d, json_out=getattr(args, "json", False)))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1373,6 +1379,11 @@ def main(argv=None):
 
     st = sub.add_parser("stance", help="honest capability comparison vs Cellebrite/AXIOM/GrayKey/Elcomsoft")
     st.set_defaults(fn=cmd_stance)
+
+    from . import doctor
+    dc = sub.add_parser("doctor", help="workstation + device diagnostics (pre-case sanity pass)")
+    dc.add_argument("--json", action="store_true")
+    dc.set_defaults(fn=cmd_doctor)
 
     from . import icloud
     ic = acq_sub.add_parser("icloud", help="iCloud account-level acquisition (REQUIRES lawful authorization: --warrant)")
