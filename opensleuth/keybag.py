@@ -136,7 +136,11 @@ def analyze(path: str | Path) -> dict[str, Any]:
 
 
 def escrow_keybags(path: str | Path) -> list[dict[str, Any]]:
-    """Extract keybags embedded in an escrow record (plist)."""
+    """Extract keybags embedded in an escrow record (plist).
+
+    Handles both raw-bytes keybags and base64 string keybags (the
+    BackupKeyBag form found in encrypted-backup Manifest.plist files).
+    """
     p = Path(path)
     try:
         with open(p, "rb") as fh:
@@ -145,13 +149,27 @@ def escrow_keybags(path: str | Path) -> list[dict[str, Any]]:
         raise KeybagError(f"{p}: not a readable plist: {exc}") from exc
     found = []
 
+    def try_keybag(candidate: bytes, where: str):
+        if candidate[: len(MAGIC)] != MAGIC:
+            return
+        try:
+            found.append(parse_keybag(candidate, source=where))
+        except KeybagError:
+            pass
+
     def walk(node: Any, path_str: str = ""):
         if isinstance(node, bytes):
-            if node[: len(MAGIC)] == MAGIC:
-                try:
-                    found.append(parse_keybag(node, source=f"{p}:{path_str or '<root>'}"))
-                except KeybagError:
-                    pass
+            try_keybag(node, f"{p}:{path_str or '<root>'}")
+            return
+        if isinstance(node, str):
+            # base64 string keybags are common in Manifest.plist
+            stripped = node.strip()
+            try:
+                decoded = __import__("base64").b64decode(stripped, validate=True)
+            except Exception:  # noqa: BLE001
+                return
+            if decoded[: len(MAGIC)] == MAGIC:
+                try_keybag(decoded, f"{p}:{path_str or '<root>'} (b64)")
             return
         if isinstance(node, dict):
             for k, v in node.items():

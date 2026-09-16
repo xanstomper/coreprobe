@@ -45,6 +45,20 @@ inventory of the documented patch classes (AMFI bypass, KTRR wipe,
 iBoot sig NOP, SPTM bypass, Blackbird SEP ops). Combined with the DFU
 workbench they form a complete open-source development loop.
 
+## Modern-phone BFU intelligence (works even with SEP intact)
+```
+opensleuth bfufs <mounted-or-pulled-root>
+    -> per-file protection class map (real cprotect xattrs)
+    -> content-readable-now inventory (class None - plaintext at BFU!)
+    -> metadata-only targets (CUFUA) + privacy interest map
+opensleuth keybag backupbag <Manifest.plist>
+    -> extract the BackupKeyBag from an encrypted backup (base64 or raw)
+```
+On ANY modern phone a BFU ramdisk pull exposes the class map: which files
+are plaintext at BFU, which are metadata-only until first unlock, and
+exactly where the interesting data lives (chat/media/health/location).
+The backup keybag is the artifact pairing for passcode/escrow decryption.
+
 ## Research workbench (the "make ours" pipeline)
 ```
 dfu-usbmon.sh  -> usbmon text capture

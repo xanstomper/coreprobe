@@ -1410,6 +1410,33 @@ def cmd_bfu_decrypt(args):
     sys.exit("bfu-decrypt: use --inspect, --key, or --cprotect + --class-key")
 
 
+def cmd_keybag_backupbag(args):
+    from .keybag import KeybagError, escrow_keybags, keybag_status
+    try:
+        bags = escrow_keybags(args.file)
+    except KeybagError as exc:
+        print(f"backupbag: {exc}")
+        return
+    for b in bags:
+        st = keybag_status(b)
+        print(f"backup keybag ({st['bag_type']}) uuid={b['uuid'][:16]}... "
+              f"keys={b['num_keys']} usable-now={st['usable_count']}")
+        for r in st["classes"]:
+            print(f"    {'+' if r['usable_now'] else '-'} {r['class']}"
+                  f"  ({r['key_material_present']}/{r['keys']} keys)")
+
+
+def cmd_bfufs(args):
+    import json
+    from . import bfufs
+    rows = bfufs.scan_fs(args.dir)
+    rep = bfufs.classify(rows)
+    if args.json:
+        print(json.dumps(rep, indent=2))
+        return
+    print(bfufs.render_report(rep))
+
+
 def cmd_keybag_status(args):
     from .keybag import KeybagError, render_status
     try:
@@ -1705,6 +1732,10 @@ def main(argv=None):
     ke = kb_sub.add_parser("escrow", help="extract keybags embedded in an iTunes escrow record (plist)")
     ke.add_argument("file")
     ke.set_defaults(fn=cmd_keybag_escrow)
+    kbk = kb_sub.add_parser("backupbag", help="extract the BackupKeyBag from an encrypted backup's Manifest.plist (modern phones)")
+    kbk.add_argument("file", help="path to Manifest.plist of an encrypted backup")
+    kbk.set_defaults(fn=cmd_keybag_backupbag)
+
     ku = kb_sub.add_parser("unwrap", help="unwrap keybag class keys with the device UID key (our own BFU decryption stack)")
     ku.add_argument("file", help="keybag file (systembag.kb / userbag.kb / backupbag.kb)")
     ku.add_argument("--uid-key", required=True, help="UID key: hex string or path to a key file (from gaster keys / ipwndfu)")
@@ -1773,6 +1804,12 @@ def main(argv=None):
     rp = sub.add_parser("patches", help="public research patch catalog (documented modification points, research devices)")
     rp.add_argument("--target", default="", choices=["kernel", "sptm", "sep", "iboot", "kernel/userspace", ""])
     rp.set_defaults(fn=cmd_patches)
+
+    from . import bfufs as _bfufs
+    bf = sub.add_parser("bfufs", help="BFU filesystem intelligence: per-class metadata map + readable-now inventory (modern phones)")
+    bf.add_argument("dir", help="BFU-mounted or pulled filesystem root")
+    bf.add_argument("--json", action="store_true")
+    bf.set_defaults(fn=cmd_bfufs)
 
     args = ap.parse_args(argv)
     args.fn(args)
