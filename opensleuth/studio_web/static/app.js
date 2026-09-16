@@ -1164,6 +1164,8 @@ async function pageArtifacts() {
       <input class="form-input" id="art-dir" placeholder="extraction root (e.g. ~/cases/C1/extraction)" style="width:340px">
       <button class="btn" onclick="runCrashLogs()">Crash logs</button>
       <button class="btn" onclick="runWireless()">Wireless</button>
+      <button class="btn" onclick="runSysdiagnose()">Sysdiagnose</button>
+      <button class="btn" onclick="runKnowledgeC()">knowledgeC</button>
       <button class="btn" onclick="runSuperTimeline()">Super-timeline</button>
     </div>
     <div id="art-out" style="margin-top:10px"></div></div>`;
@@ -1191,6 +1193,33 @@ async function runWireless() {
     <div class="log-text"><b>${wifi.length}</b> WiFi networks · <b>${bt.length}</b> Bluetooth entries</div></div>
     ${wifi.slice(0, 15).map(w => `<div class="mono" style="padding-left:14px">wifi: ${esc(w.ssid || w.network_id)} ${w.bssid ? "· " + esc(w.bssid) : ""} · ${esc(w.security || "?")}</div>`).join("")}
     ${bt.slice(0, 15).map(b => `<div class="mono" style="padding-left:14px">bt: ${esc(b.name || b.address || "?")} ${b.paired ? "· paired" : "· recent"}</div>`).join("")}`;
+}
+async function runSysdiagnose() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  const r = await api("/api/sysdiagnose?dir=" + encodeURIComponent(d));
+  const cat = (r && r.by_category) || {};
+  const files = (r && r.files) || [];
+  out.innerHTML = `
+    <div class="log-event"><span class="dot ${r.total ? "green" : "amber"}"></span>
+    <div class="log-text"><b>${r.total || 0}</b> files inventoried${r.root ? " · " + esc(r.root) : ""}</div></div>
+    ${Object.entries(cat).sort((a, b) => b[1].length - a[1].length).map(([k, v]) =>
+      `<div class="mono" style="padding-left:14px">· ${esc(k)}: ${v.length} file${v.length == 1 ? "" : "s"}</div>`).join("")}
+    ${files.filter(f => f.category).slice(0, 12).map(f =>
+      `<div class="mono" style="padding-left:14px;opacity:.75">· ${esc(f.relpath)}</div>`).join("")}`;
+}
+async function runKnowledgeC() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  const r = await api("/api/knowledgec?dir=" + encodeURIComponent(d));
+  const ev = (r && r.events) || [], top = (r && r.top_apps) || {};
+  out.innerHTML = `
+    <div class="log-event"><span class="dot ${ev.length ? "green" : "amber"}"></span>
+    <div class="log-text"><b>${ev.length}</b> knowledgeC events · top apps ${esc(JSON.stringify(top))}</div></div>
+    ${ev.slice(0, 25).map(e =>
+      `<div class="mono" style="padding-left:14px">· ${esc(e.ts || "?")} [${esc(e.kind || "?")}] ${esc(e.value || "")}</div>`).join("")}`;
 }
 async function runSuperTimeline() {
   const d = document.getElementById("art-dir").value.trim();

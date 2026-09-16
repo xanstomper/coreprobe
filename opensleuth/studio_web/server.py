@@ -615,6 +615,28 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, b'{"error":"dir required"}', "application/json")
                 return
             self._send(200, json.dumps(wireless.scan(d), default=str))
+        elif path == "/api/sysdiagnose":
+            qs = parse_qs(parsed.query)
+            from .. import sysdiagnose as SD
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            self._send(200, json.dumps(SD.inventory(d), default=str))
+        elif path == "/api/knowledgec":
+            qs = parse_qs(parsed.query)
+            from .. import knowledgec as KC
+            d = qs.get("dir", [""])[0]
+            if not d:
+                self._send(400, b'{"error":"dir required"}', "application/json")
+                return
+            dbs = KC.find_knowledgec(d)
+            rows = []
+            for db in dbs[:3]:
+                rows.extend(KC.parse_knowledgec(db, limit=5000))
+            self._send(200, json.dumps({"dbs": [str(x) for x in dbs],
+                                        "events": rows[:5000],
+                                        "top_apps": KC.app_usage_summary(rows)}, default=str))
         elif path == "/api/surface":
             from .. import surface
             from ..exploits import RECENT_DISCLOSURES
