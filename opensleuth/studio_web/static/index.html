@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forensic Artifact Recovery</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="app">
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-title">CoreProbe</div>
+      <div class="brand-sub">Forensic Artifact Recovery</div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="rail-footer">
+      <span class="dot online"></span> System Online
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="logo-shield"></span>
+        <span class="topbar-title">CoreProbe</span>
+        <span class="topbar-sep"></span>
+        <span class="topbar-tag">Mobile · Computer · Cloud · Evidence</span>
+      </div>
+      <div class="topbar-center">
+        <input type="text" class="search" placeholder="Search evidence, device, user, or hash...">
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" title="Notifications" onclick="toggleNotifs()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#9aa1ad" stroke-width="1.5" style="vertical-align:middle"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+        </button>
+        <button class="icon-btn" title="Settings" onclick="location.hash='settings'">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#9aa1ad" stroke-width="1.5" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8L7 17M17 7l2.8-2.8"/></svg>
+        </button>
+        <span class="topbar-sep"></span>
+        <span id="case-id" class="case-id">—</span>
+        <span id="evidence-count" class="evidence-count">0 items</span>
+        <span class="user-avatar"></span>
+      </div>
+    </header>
+    <div class="content">
+      <main id="page" class="page"></main>
+      <aside class="case-panel">
+        <div class="panel-title">Case Information</div>
+        <div id="case-info"></div>
+        <div class="panel-section" id="evidence-sources-wrap">
+          <div class="panel-heading">Evidence Sources</div>
+          <div id="evidence-sources"></div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-heading">Notes</div>
+          <textarea id="case-notes" class="notes-input" placeholder="Add a note..."></textarea>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+<div id="lightbox" style="display:none;position:fixed;inset:0;background:rgba(5,6,8,.95);z-index:100;align-items:center;justify-content:center;flex-direction:column" onclick="if(event.target===this)closeLightbox()">
+  <div style="position:absolute;top:14px;right:20px;color:#9aa1ad;font-size:24px;cursor:pointer;line-height:1" onclick="closeLightbox()">×</div>
+  <div id="lb-name" class="mono" style="color:#5d6470;margin-bottom:8px">—</div>
+  <img id="lb-img" style="max-width:66vw;max-height:64vh;border:1px solid #232833;border-radius:4px">
+  <div style="display:flex;align-items:center;gap:14px;margin-top:12px">
+    <button class="btn" onclick="navLight(-1)">‹ Prev</button>
+    <button class="btn" onclick="navLight(1)">Next ›</button>
+  </div>
+  <div id="lb-meta" class="mono" style="color:#9aa1ad;margin-top:14px;max-width:660px;text-align:center;font-size:11px"></div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
