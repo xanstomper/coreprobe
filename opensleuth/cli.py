@@ -331,17 +331,25 @@ def cmd_acquire_bfu(args):
                 break
         if res["checkm8"].get("tool"):
             mnt_state = "recovery/DFU" if res["recovery_dfu"] else "normal"
-            print(f"[checkm8] device in {mnt_state}; running {res['checkm8']['tool']} flow")
-            try:
-                if res["checkm8"]["tool"] == "gaster":
-                    p = subprocess.run(["gaster", "pwn"], capture_output=True, text=True, timeout=120)
-                    res["checkm8"]["outcome"] = p.stdout[-400:] or p.stderr[-400:]
-                    if p.returncode == 0 and shutil.which("irecovery"):
-                        for env in ("serial", "ecid", "boardid", "sxpt"):
-                            e = subprocess.run(["irecovery", "-q", "-c", f"getenv {env}"], capture_output=True, text=True, timeout=20)
-                            res["checkm8"][f"iBoot_{env}"] = e.stdout.strip() or e.stderr.strip()
-            except subprocess.TimeoutExpired:
-                res["checkm8"]["outcome"] = "timed out (is the device in DFU?)"
+            if not res["recovery_dfu"] and not getattr(args, "force", False):
+                res["checkm8"]["guidance"] = (
+                    "checkm8 tooling present, but the device is NOT in recovery/DFU. "
+                    "Enter DFU on the device (or pass --force to attempt anyway, "
+                    "e.g. when DFU entry was already anticipated)."
+                )
+                print(f"[checkm8] {res['checkm8']['guidance']}")
+            else:
+                print(f"[checkm8] device in {mnt_state}; running {res['checkm8']['tool']} flow")
+                try:
+                    if res["checkm8"]["tool"] == "gaster":
+                        p = subprocess.run(["gaster", "pwn"], capture_output=True, text=True, timeout=120)
+                        res["checkm8"]["outcome"] = p.stdout[-400:] or p.stderr[-400:]
+                        if p.returncode == 0 and shutil.which("irecovery"):
+                            for env in ("serial", "ecid", "boardid", "sxpt"):
+                                e = subprocess.run(["irecovery", "-q", "-c", f"getenv {env}"], capture_output=True, text=True, timeout=20)
+                                res["checkm8"][f"iBoot_{env}"] = e.stdout.strip() or e.stderr.strip()
+                except subprocess.TimeoutExpired:
+                    res["checkm8"]["outcome"] = "timed out (is the device in DFU?)"
         else:
             res["checkm8"]["guidance"] = (
                 "vulnerable chip (A7-A11) but no checkm8 tooling installed. "
@@ -389,6 +397,28 @@ def cmd_acquire_bfu(args):
         print("  " + res["checkm8"]["guidance"])
     if res["checkm8"].get("outcome"):
         print("  checkm8 output:", res["checkm8"]["outcome"][:300])
+
+    # per-class expectations + optional payload-driven ramdisk extraction
+    from .bfu import render_expectations, run_ramdisk_extract
+    print()
+    print(render_expectations(chip=res.get("checkm8", {}).get("chip", "?"),
+                              ios=getattr(args, "ios", "") or ""))
+    if getattr(args, "ramdisk", None):
+        print()
+        print("[ramdisk] payload dir:", args.ramdisk)
+        r = run_ramdisk_extract(args.ramdisk, out)
+        res["ramdisk"] = r
+        print("  ok:", r.get("ok"))
+        if r.get("error"):
+            print("  error:", r["error"])
+        if r.get("note"):
+            print("  note:", r["note"])
+        if r.get("keybags_tar"):
+            print("  keybags tar:", r["keybags_tar"])
+    import json as _json
+    (out / "bfu-report.json").write_text(_json.dumps(res, indent=2, default=str))
+    print()
+    print("report:", out / "bfu-report.json")
 
 
 def _chip_from_serial(serial):
@@ -1082,6 +1112,45 @@ def cmd_stance(args):
     print(forensics.render_stance())
 
 
+def cmd_appcatalog_list(args):
+    from . import appcatalog
+    if args.json:
+        import json
+        print(json.dumps(appcatalog.APP_CATALOG, indent=2))
+        return
+    print(appcatalog.render_list())
+
+
+def cmd_appcatalog_inventory(args):
+    from . import appcatalog
+    import json
+    dbs = appcatalog.find_dbs(Path(args.dir))
+    inv = []
+    for d in dbs:
+        i = appcatalog.inventory(Path(d["path"]))
+        if i:
+            inv.append({**d, **i})
+    if args.json:
+        print(json.dumps(inv, indent=2))
+        return
+    print(appcatalog.render_inventory(Path(args.dir)).splitlines()[0])
+    for i in inv:
+        print(f"\n{i['rel']}  ({i['size']} B)  app={i['app']}")
+        for t in i["tables"]:
+            print(f"   {t['rows']:>10,} rows  {t['table']}  cols: {', '.join(t['columns'][:8])}")
+    print(f"\n{len(inv)} databases; extract any table with: opensleuth appcatalog extract <db> <table> --out x.csv")
+
+
+def cmd_appcatalog_extract(args):
+    from . import appcatalog
+    r = appcatalog.extract_table(Path(args.db), args.table, Path(args.out),
+                                 limit=args.limit, where=args.where)
+    if not r.get("ok"):
+        print(f"extract failed: {r.get('error')}")
+        return
+    print(f"{r['rows']:,} rows x {len(r['columns'])} cols -> {r['csv']}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1114,6 +1183,9 @@ def main(argv=None):
     bfu = acq_sub.add_parser("bfu", help="BFU master: everything obtainable before first unlock")
     bfu.add_argument("--out", required=True)
     bfu.add_argument("--chip", help="chip hint when it cannot be auto-detected (e.g. A10)")
+    bfu.add_argument("--ios", help="iOS version for expectations (e.g. 18.7.1)")
+    bfu.add_argument("--ramdisk", help="payload dir (iBSS/iBEC/ramdisk/devicetree/trustcache) to run the checkm8 BFU ramdisk pull after pwn")
+    bfu.add_argument("--force", action="store_true", help="attempt checkm8 pwn even when no DFU/recovery state is detected")
     bfu.set_defaults(fn=cmd_acquire_bfu)
     c8 = acq_sub.add_parser("checkm8", help="zero-hardware bootrom route (A7-A11): gaster pwn -> palera1n/PongoOS -> FS + BFU-partial")
     c8.add_argument("--out", required=True)
@@ -1212,6 +1284,32 @@ def main(argv=None):
 
     st = sub.add_parser("stance", help="honest capability comparison vs Cellebrite/AXIOM/GrayKey/Elcomsoft")
     st.set_defaults(fn=cmd_stance)
+
+    from . import icloud
+    ic = acq_sub.add_parser("icloud", help="iCloud account-level acquisition (REQUIRES lawful authorization: --warrant)")
+    ic.add_argument("--username", help="Apple ID email")
+    ic.add_argument("--password", help="Apple ID password (or app-specific)")
+    ic.add_argument("--warrant", help="warrant/case reference - REQUIRED, gate refuses without it")
+    ic.add_argument("--out", required=True)
+    ic.set_defaults(fn=icloud.cmd_acquire_icloud)
+
+    from . import appcatalog
+    ac = sub.add_parser("appcatalog", help="app artifact breadth: catalog, sqlite inventory, table extraction")
+    ac_sub = ac.add_subparsers(dest="appcat", required=True)
+    l = ac_sub.add_parser("list", help="show the ~45-app catalog")
+    l.add_argument("--json", action="store_true")
+    l.set_defaults(fn=cmd_appcatalog_list)
+    inv = ac_sub.add_parser("inventory", help="scan an extracted container/image dir for app databases")
+    inv.add_argument("dir")
+    inv.add_argument("--json", action="store_true")
+    inv.set_defaults(fn=cmd_appcatalog_inventory)
+    ex = ac_sub.add_parser("extract", help="dump a discovered table to CSV")
+    ex.add_argument("db")
+    ex.add_argument("table")
+    ex.add_argument("--out", required=True)
+    ex.add_argument("--limit", type=int, default=100000)
+    ex.add_argument("--where", default="", help="SQL where clause (no WHERE keyword)")
+    ex.set_defaults(fn=cmd_appcatalog_extract)
 
     args = ap.parse_args(argv)
     args.fn(args)
