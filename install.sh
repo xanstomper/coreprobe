@@ -3,16 +3,18 @@
 # Installs: python deps (pymobiledevice3), libimobiledevice stack, ifuse,
 # checkm8 tooling (gaster/irecovery/palera1n), optional web studio service.
 #
-# Usage:  sudo ./install.sh [--with-web-service] [--with-checkm8-tools]
+# Usage:  sudo ./install.sh [--with-web-service] [--with-checkm8-tools] [--with-desktop]
 set -euo pipefail
 
 PY="${PYTHON:-python3}"
 WITH_WEB=0
 WITH_C8=0
+WITH_DESKTOP=0
 for a in "$@"; do
   case "$a" in
     --with-web-service) WITH_WEB=1 ;;
     --with-checkm8-tools) WITH_C8=1 ;;
+    --with-desktop) WITH_DESKTOP=1 ;;
     *) echo "unknown arg: $a"; exit 2 ;;
   esac
 done
@@ -78,6 +80,20 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable --now opensleuth-web || true
   echo "web studio: http://127.0.0.1:9121"
+fi
+
+if [ "$WITH_DESKTOP" = "1" ]; then
+  echo "== desktop shell (PyQt6 + QtWebEngine) =="
+  $PY -m pip install --break-system-packages -q PyQt6 PyQt6-WebEngine 2>/dev/null \
+    || $PY -m pip install -q PyQt6 PyQt6-WebEngine
+  PREFIX="${HOME:-/root}/.local/bin"; mkdir -p "$PREFIX"
+  REPO="$(cd "$(dirname "$0")" && pwd)"
+  cat > "$PREFIX/opensleuth-desktop" <<EOF
+#!/usr/bin/env bash
+cd "$REPO" && exec $PY -m opensleuth.studio_desktop
+EOF
+  chmod +x "$PREFIX/opensleuth-desktop"
+  echo "desktop shell: opensleuth-desktop"
 fi
 
 echo "== done =="

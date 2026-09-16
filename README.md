@@ -312,9 +312,20 @@ One-command examiner install (apt deps, pyiosbackup/pymobiledevice3, optional ch
 git clone https://github.com/xanstomper/coreprobe && cd coreprobe
 sudo ./install.sh --with-web-service
 # optional: sudo ./install.sh --with-checkm8-tools   (gaster/palera1n/irecovery)
+# optional: sudo ./install.sh --with-desktop         (native Qt desktop shell)
 
 python3 -m opensleuth exposure --chip A13 --ios 26.6.1
 ```
+
+**Desktop app** (native window over the same workspace UI):
+
+```bash
+python3 -m opensleuth.studio_desktop   # or: opensleuth-desktop
+```
+
+The shell embeds the web backend on 127.0.0.1, with native menus
+(Navigate/View/Help), toolbar navigation, Ctrl+1-5 page shortcuts, zoom, and a
+live device status bar (model, AFU/BFU state, chip, iOS) polling `/api/device`.
 
 The web studio binds **127.0.0.1 only** by default. To expose it (tunnel / LAN), set
 `OPENSLEUTH_HOST=0.0.0.0` explicitly. There is no built-in auth: never bind it to a
