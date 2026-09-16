@@ -104,6 +104,57 @@ def render_expectations(chip: str = "?", ios: str = "?") -> str:
 RAMDISK_FILES = ["iBSS", "iBEC", "ramdisk", "devicetree", "trustcache"]
 
 
+def capture_aes_keys(out: str | Path, tool: str = "gaster") -> dict[str, Any]:
+    """Dump the device AES keyset from a pwned A7-A11 device.
+
+    gaster (preferred): 'gaster keys' writes files to ./gaster/ or stdout
+    depending on build; ipwndfu: 'ipwndfu -k' prints keys to a file.
+    Returns what was captured and where, honestly (may fail without a
+    pwned device in DFU).
+    """
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    if tool == "gaster":
+        cmd = ["gaster", "keys"]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        except FileNotFoundError:
+            return {"ok": False, "error": "gaster not installed",
+                    "hint": "sudo apt install gaster  (or clone 0x7ff/gaster)"}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "gaster keys timed out (device must be checkm8-pwned, in DFU)"}
+        # gaster keys writes ./gaster/*.bin and prints a summary
+        produced = sorted(Path("gaster").glob("*.bin")) if Path("gaster").exists() else []
+        if p.returncode == 0 and produced:
+            saved = []
+            for f in produced:
+                dest = out / f.name
+                dest.write_bytes(f.read_bytes())
+                saved.append(str(dest))
+            return {"ok": True, "tool": "gaster", "keys": saved,
+                    "note": "AES keyset (GID/UID-wrapped) captured from the pwned device"}
+        return {"ok": False, "error": "gaster keys produced no keyset",
+                "out": (p.stdout or p.stderr).strip()[-300:],
+                "hint": "device must be checkm8-pwned and in DFU (run gaster pwn first)"}
+    if tool == "ipwndfu":
+        cmd = ["ipwndfu", "-k"]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        except FileNotFoundError:
+            return {"ok": False, "error": "ipwndfu not installed",
+                    "hint": "git clone https://github.com/axi0mX/ipwndfu && ./ipwndfu -k"}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "ipwndfu -k timed out (device must be in pwned DFU)"}
+        if p.returncode == 0:
+            target = out / "aes-keys-ipwndfu.bin"
+            target.write_bytes((p.stdout or p.stderr).encode())
+            return {"ok": True, "tool": "ipwndfu", "keys": [str(target)],
+                    "note": "AES keyset output captured (verify with keybag analysis)"}
+        return {"ok": False, "error": "ipwndfu -k failed",
+                "out": (p.stdout or p.stderr).strip()[-300:]}
+    return {"ok": False, "error": f"unknown tool: {tool}"}
+
+
 def payload_status(payload_dir: str | Path) -> list[dict[str, Any]]:
     d = Path(payload_dir)
     return [{"file": f, "present": (d / f).exists()} for f in RAMDISK_FILES]

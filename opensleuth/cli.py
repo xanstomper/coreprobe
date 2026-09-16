@@ -415,6 +415,41 @@ def cmd_acquire_bfu(args):
             print("  note:", r["note"])
         if r.get("keybags_tar"):
             print("  keybags tar:", r["keybags_tar"])
+
+    # AES keyset capture (checkm8-pwned device)
+    if getattr(args, "keys", False):
+        from .bfu import capture_aes_keys
+        if not res["recovery_dfu"] and not getattr(args, "force", False):
+            print("[aes keys] skipped: device is not in recovery/DFU (pwn it first,"
+                  " or pass --force).")
+        else:
+            print()
+            print("[aes keys] capturing device AES keyset from the pwned device")
+            k = capture_aes_keys(out, tool="gaster")
+            res["aes_keys"] = k
+            print("  ok:", k.get("ok"))
+            if k.get("error"):
+                print("  error:", k["error"])
+                if k.get("hint"):
+                    print("  hint:", k["hint"])
+            for f in k.get("keys", []):
+                print("  key file:", f)
+
+    # keybag analysis: any kbagic files found in the output dir
+    from .keybag import KeybagError, analyze, render_status as _render_kb
+    bags = [f for f in out.iterdir() if f.is_file() and (
+        f.suffix in (".kb", ".keybag", ".bag")
+        or f.name in ("systembag.kb", "userbag.kb", "backupbag.kb"))]
+    if bags:
+        res["keybags"] = []
+        for bf in bags:
+            try:
+                a = analyze(bf)
+                res["keybags"].append(a)
+                print()
+                print(_render_kb(bf))
+            except KeybagError as exc:
+                print(f"  keybag parse failed for {bf}: {exc}")
     import json as _json
     (out / "bfu-report.json").write_text(_json.dumps(res, indent=2, default=str))
     print()
@@ -1151,6 +1186,22 @@ def cmd_appcatalog_extract(args):
     print(f"{r['rows']:,} rows x {len(r['columns'])} cols -> {r['csv']}")
 
 
+def cmd_keybag_status(args):
+    from .keybag import KeybagError, render_status
+    try:
+        print(render_status(args.file))
+    except KeybagError as exc:
+        print(f"keybag: {exc}")
+
+
+def cmd_keybag_escrow(args):
+    from .keybag import KeybagError, render_escrow
+    try:
+        print(render_escrow(args.file))
+    except KeybagError as exc:
+        print(f"escrow: {exc}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1186,6 +1237,7 @@ def main(argv=None):
     bfu.add_argument("--ios", help="iOS version for expectations (e.g. 18.7.1)")
     bfu.add_argument("--ramdisk", help="payload dir (iBSS/iBEC/ramdisk/devicetree/trustcache) to run the checkm8 BFU ramdisk pull after pwn")
     bfu.add_argument("--force", action="store_true", help="attempt checkm8 pwn even when no DFU/recovery state is detected")
+    bfu.add_argument("--keys", action="store_true", help="capture the device AES keyset (gaster keys) from the pwned device")
     bfu.set_defaults(fn=cmd_acquire_bfu)
     c8 = acq_sub.add_parser("checkm8", help="zero-hardware bootrom route (A7-A11): gaster pwn -> palera1n/PongoOS -> FS + BFU-partial")
     c8.add_argument("--out", required=True)
@@ -1310,6 +1362,16 @@ def main(argv=None):
     ex.add_argument("--limit", type=int, default=100000)
     ex.add_argument("--where", default="", help="SQL where clause (no WHERE keyword)")
     ex.set_defaults(fn=cmd_appcatalog_extract)
+
+    from . import keybag
+    kb = sub.add_parser("keybag", help="parse iOS keybags (kbagic) and report BFU-usable protection classes")
+    kb_sub = kb.add_subparsers(dest="kb", required=True)
+    ks = kb_sub.add_parser("status", help="show per-class key presence of a keybag file")
+    ks.add_argument("file")
+    ks.set_defaults(fn=cmd_keybag_status)
+    ke = kb_sub.add_parser("escrow", help="extract keybags embedded in an iTunes escrow record (plist)")
+    ke.add_argument("file")
+    ke.set_defaults(fn=cmd_keybag_escrow)
 
     args = ap.parse_args(argv)
     args.fn(args)

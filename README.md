@@ -29,6 +29,8 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | Forensic toolchain catalog (`opensleuth tools`, live installed-status) | Python stdlib | ✅ |
 | Commercial comparison (`opensleuth stance` - honest Cellebrite/AXIOM/GrayKey matrix) | Python stdlib | ✅ |
 | BFU acquisition (`acquire bfu` - per-class expectations + checkm8 ramdisk pull) | Python + checkm8 tooling | ✅ |
+| BFU keybag analysis (`keybag status/escrow` - kbagic parser, per-class key presence) | Python stdlib | ✅ |
+| BFU AES keyset capture (`acquire bfu --keys` - gaster/ipwndfu from pwned device) | Python + checkm8 tooling | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |
