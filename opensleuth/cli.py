@@ -1077,6 +1077,11 @@ def cmd_tools(args):
     print(forensics.render_tools(installed_only=args.installed))
 
 
+def cmd_stance(args):
+    from . import forensics
+    print(forensics.render_stance())
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1204,6 +1209,9 @@ def main(argv=None):
     tk.add_argument("--installed", action="store_true", help="only show installed tools")
     tk.add_argument("--json", action="store_true", help="machine-readable output")
     tk.set_defaults(fn=cmd_tools)
+
+    st = sub.add_parser("stance", help="honest capability comparison vs Cellebrite/AXIOM/GrayKey/Elcomsoft")
+    st.set_defaults(fn=cmd_stance)
 
     args = ap.parse_args(argv)
     args.fn(args)

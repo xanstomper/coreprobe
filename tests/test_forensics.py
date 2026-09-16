@@ -9,6 +9,43 @@ def test_catalog_has_all_categories():
     assert cats == {"acquisition", "jailbreak", "restore", "parsing", "analysis"}
 
 
+def test_catalog_includes_commercial_comparison_entries():
+    rows = F.detect()
+    names = {t["name"] for t in rows}
+    for commercial in ("Cellebrite UFED / Premium", "Magnet AXIOM", "GrayKey",
+                       "Elcomsoft iOS Forensic Toolkit", "MSAB XRY",
+                       "Oxygen Forensic Detective", "Belkasoft Evidence Center X"):
+        assert commercial in names
+    assert any(not t["oss"] for t in rows)
+
+
+def test_stance_matrix_shape():
+    assert len(F.COMPETITORS) == 4
+    assert len(F.STANCE_ROWS) >= 10
+    # each row: capability + one status per competitor + CoreProbe
+    for row in F.STANCE_ROWS:
+        assert len(row) == 1 + 1 + len(F.COMPETITORS)
+        cap, *cells = row
+        assert cap and all(c in F._STATUS for c in cells), row
+
+
+def test_stance_honest_about_modern_lock():
+    # BFU bypass and iCloud must be honest NONE for CoreProbe
+    by_cap = {r[0]: r[1:] for r in F.STANCE_ROWS}
+    assert by_cap["BFU passcode bypass"][0] == "NONE"
+    assert by_cap["Cloud (iCloud) acquisition"][0] == "NONE"
+    # usbliter8 classified as research, not full
+    assert by_cap["usbliter8 DFU route (A12/A13)"][0] == "RESEARCH"
+
+
+def test_stance_renders_columns_and_legend():
+    out = F.render_stance()
+    for c in ["CoreProbe", "Cellebrite UFED/Premium", "Magnet AXIOM", "GrayKey"]:
+        assert c in out
+    assert "● full" in out and "○ none" in out and "legend:" in out
+    assert "bottom line:" in out
+
+
 def test_tools_all_have_required_fields():
     for t in F.TOOLS:
         assert t["name"] and t["purpose"]

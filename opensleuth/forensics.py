@@ -37,9 +37,24 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "pyiosbackup", "cat": "acquisition", "oss": True, "detect": "pyiosbackup",
      "url": "https://github.com/avivyar/pyiosbackup",
      "purpose": "Encrypted/local backup decryption - the keychain unpack used by `opensleuth acquire --unback`."},
+    {"name": "iphone-dataprotection", "cat": "acquisition", "oss": True, "detect": "iphonedataprotection",
+     "url": "https://github.com/dunhamsteve/iphone-dataprotection",
+     "purpose": "Backup keybag + keychain decryption research suite (Jean Sigwald lineage) - the foundation of iOS backup forensics."},
     {"name": "ipwndfu", "cat": "acquisition", "oss": True, "detect": "ipwndfu",
      "url": "https://github.com/axi0mX/ipwndfu",
      "purpose": "Legacy A4-era bootrom pwn + early checkm8 research harness."},
+    {"name": "Santoku Linux", "cat": "acquisition", "oss": True, "detect": "santoku",
+     "url": "https://santoku-linux.com",
+     "purpose": "Mobile forensic/security distro bundling the iOS acquisition + parsing stack."},
+    {"name": "Cellebrite UFED / Premium", "cat": "acquisition", "oss": False, "detect": "Ufed",
+     "url": "https://cellebrite.com",
+     "purpose": "Commercial acquisition platform: BFU/DPA services, cloud, locked-device extraction (closed)."},
+    {"name": "GrayKey", "cat": "acquisition", "oss": False, "detect": "graykey",
+     "url": "https://graykey.grayshift.com",
+     "purpose": "Commercial BFU passcode-bypass hardware (A12+ scenes per-service pricing, closed)."},
+    {"name": "Elcomsoft iOS Forensic Toolkit", "cat": "acquisition", "oss": False, "detect": "iosft",
+     "url": "https://elcomsoft.com/ios_forensic_toolkit.html",
+     "purpose": "Commercial acquisition: logical/agents/checkm8 routes to keychain + FS (closed)."},
     # ---------------------------------------------------------- jailbreak
     {"name": "checkra1n", "cat": "jailbreak", "oss": True, "detect": "checkra1n",
      "url": "https://checkra.in",
@@ -66,10 +81,16 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "img4tool", "cat": "restore", "oss": True, "detect": "img4tool",
      "url": "https://github.com/tihmstar/img4tool",
      "purpose": "IMG4/IM4P parsing for restore-image analysis."},
+    {"name": "apfs-fuse", "cat": "restore", "oss": True, "detect": "apfs-fuse",
+     "url": "https://github.com/sgan81/apfs-fuse",
+     "purpose": "Mount APFS container from disk images/ramdisks - filesystem-level triage."},
     # ------------------------------------------------------------ parsing
     {"name": "iLEAPP", "cat": "parsing", "oss": True, "detect": "iLEAPP",
      "url": "https://github.com/abrignoni/iLEAPP",
      "purpose": "iOS Logs Events And Plists Parser - SMS, calls, Safari, locations + 100+ artifacts."},
+    {"name": "iLEAPPGUI", "cat": "parsing", "oss": True, "detect": "iLEAPPGUI",
+     "url": "https://github.com/abrignoni/iLEAPPGUI",
+     "purpose": "Point-and-click GUI wrapper over iLEAPP artifact definitions."},
     {"name": "MEAT", "cat": "parsing", "oss": True, "detect": "MEAT",
      "url": "https://github.com/abrignoni/MEAT",
      "purpose": "Media Evidence Analysis Toolkit - photo/video metadata and timeline."},
@@ -82,6 +103,12 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "MVT", "cat": "parsing", "oss": True, "detect": "mvt",
      "url": "https://github.com/mvt-project/mvt",
      "purpose": "Mobile Verification Toolkit - spyware/Pegasus indicators in iOS backups."},
+    {"name": "ccl_bplist", "cat": "parsing", "oss": True, "detect": "ccl_bplist",
+     "url": "https://github.com/cclgroupltd/ccl_bplist",
+     "purpose": "Binary plist library powering iLEAPP-class artifact parsing (Python)."},
+    {"name": "keychain-dumper", "cat": "parsing", "oss": True, "detect": "keychain-dumper",
+     "url": "https://github.com/ptoomey3/Keychain-Dumper",
+     "purpose": "Dump keychain items from a jailbroken device for passcode-gated analysis."},
     # ------------------------------------------------------------ analysis
     {"name": "sqlite3", "cat": "analysis", "oss": True, "detect": "sqlite3",
      "url": "https://sqlite.org",
@@ -92,9 +119,102 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "exiftool", "cat": "analysis", "oss": True, "detect": "exiftool",
      "url": "https://exiftool.org",
      "purpose": "Media EXIF/XMP forensics - GPS, camera, edit history."},
+    {"name": "plaso / dfVFS", "cat": "analysis", "oss": True, "detect": "log2timeline",
+     "url": "https://github.com/log2timeline/plaso",
+     "purpose": "Super-timeline engine (dfVFS) - iOS artifact timelines at court scale."},
+    {"name": "bulk_extractor", "cat": "analysis", "oss": True, "detect": "bulk_extractor",
+     "url": "https://github.com/simsong/bulk_extractor",
+     "purpose": "Unstructured carving of PII/credit/GPS/URLs from filesystem images."},
+    {"name": "DB Browser for SQLite", "cat": "analysis", "oss": True, "detect": "sqlitebrowser",
+     "url": "https://sqlitebrowser.org",
+     "purpose": "GUI SQLite inspection for examiner-driven artifact review."},
+    {"name": "Ghidra", "cat": "analysis", "oss": True, "detect": "ghidraRun",
+     "url": "https://ghidra-sre.org",
+     "purpose": "NSA reverse-engineering framework - kernelcache/SPTM analysis for new routes."},
+    {"name": "radare2 / rizin", "cat": "analysis", "oss": True, "detect": "r2",
+     "url": "https://rada.re",
+     "purpose": "Scriptable RE for Mach-O/kernel research (A12+ exploit work)."},
+    {"name": "frida", "cat": "analysis", "oss": True, "detect": "frida",
+     "url": "https://frida.re",
+     "purpose": "Dynamic instrumentation - app data introspection on jailbroken devices."},
+    {"name": "Magnet AXIOM", "cat": "analysis", "oss": False, "detect": "AXIOM",
+     "url": "https://magnetforensics.com/products/magnet-axiom/",
+     "purpose": "Commercial analysis platform - artifact breadth + court-ready reports (closed)."},
+    {"name": "Oxygen Forensic Detective", "cat": "analysis", "oss": False, "detect": "oxygen",
+     "url": "https://oxygenforensics.com",
+     "purpose": "Commercial all-in-one mobile/extraction analysis (closed)."},
+    {"name": "MSAB XRY", "cat": "analysis", "oss": False, "detect": "xry",
+     "url": "https://msab.com",
+     "purpose": "Commercial mobile extraction + analysis, law-enforcement standard (closed)."},
+    {"name": "Belkasoft Evidence Center X", "cat": "analysis", "oss": False, "detect": "belkasoft",
+     "url": "https://belkasoft.com",
+     "purpose": "Commercial all-in-one with iOS app artifact support (closed)."},
 ]
 
 CATEGORY_ORDER = ["acquisition", "jailbreak", "restore", "parsing", "analysis"]
+
+# ------------------------------------------------------------- comparison --
+# Where CoreProbe stands vs commercial platforms today. Honest statuses:
+#   FULL   = complete, production-grade capability
+#   PART   = works for supported cases; gaps vs commercial tooling
+#   RESEARCH = working demo/research path, not case-ready
+#   NONE   = not implemented
+#   N/A    = capability not applicable to that product
+COMPETITORS = [
+    "Cellebrite UFED/Premium", "Magnet AXIOM", "GrayKey", "Elcomsoft iFT",
+]
+
+# (capability, CoreProbe, cellebrite, axiom, graykey, elcomsoft)
+STANCE_ROWS = [
+    ("Logical backup (local)", "FULL", "FULL", "PART", "N/A", "FULL"),
+    ("Encrypted backup + keychain (passcode)", "PART", "FULL", "PART", "N/A", "FULL"),
+    ("Full filesystem (jailbreak route)", "FULL", "FULL", "PART", "N/A", "FULL"),
+    ("checkm8 hardware route (A7-A11)", "FULL", "FULL", "N/A", "N/A", "PART"),
+    ("usbliter8 DFU route (A12/A13)", "RESEARCH", "PART", "N/A", "N/A", "PART"),
+    ("BFU passcode bypass", "NONE", "FULL", "N/A", "FULL", "PART"),
+    ("Cloud (iCloud) acquisition", "NONE", "FULL", "FULL", "N/A", "PART"),
+    ("App artifact breadth (100+ apps)", "PART", "FULL", "FULL", "N/A", "PART"),
+    ("Court-ready reporting", "PART", "FULL", "FULL", "N/A", "PART"),
+    ("Openness / auditability", "FULL", "NONE", "NONE", "NONE", "NONE"),
+    ("Automation / API", "FULL", "PART", "PART", "NONE", "PART"),
+    ("Cost", "FREE", "LICENSE", "LICENSE", "PER-CASE", "LICENSE"),
+]
+
+_STATUS = {"FULL": "● full", "PART": "◐ partial", "RESEARCH": "⚗ research",
+           "NONE": "○ none", "N/A": "—", "LICENSE": "$$$", "PER-CASE": "$$$$",
+           "FREE": "$0"}
+
+
+def render_stance() -> str:
+    heads = ["CoreProbe"] + COMPETITORS
+    w = max(len(r[0]) for r in STANCE_ROWS) + 2
+    cw = max(len(h) for h in heads) + 2
+    lines = [
+        "# CoreProbe vs commercial platforms (honest stance, 2026-09)",
+        "",
+        f"{'capability':<{w}}" + "".join(f"{c:<{cw}}" for c in heads),
+        "-" * (w + cw * len(heads)),
+    ]
+    for row in STANCE_ROWS:
+        cap, *cells = row
+        lines.append(f"{cap:<{w}}" + "".join(f"{_STATUS.get(c, c):<{cw}}" for c in cells))
+    lines += [
+        "",
+        "legend:  ● full   ◐ partial   ⚗ research   ○ none   — n/a",
+        "",
+        "bottom line:",
+        "  - CoreProbe is FULL-equivalent for logical and checkm8 (A7-A11)",
+        "    acquisition and the public exploit-catalog workflow; it is FREE,",
+        "    open, and audit-safe - Cellebrite/AXIOM are closed, licensed, and",
+        "    sandboxed per-case by their vendors.",
+        "  - Nothing open-source matches Cellebrite's BFU/DPA services, AXIOM's",
+        "    artifact breadth, or cloud acquisition. usbliter8 (A12/A13) is the",
+        "    research path that could narrow that gap with your own hardware.",
+        "  - For a modern locked device (A14+, iOS 26), the honest answer remains:",
+        "    commercial tools have the licensed bypass; CoreProbe has the catalog",
+        "    and the research instrument to find the next one.",
+    ]
+    return "\n".join(lines)
 
 
 def detect() -> list[dict[str, Any]]:

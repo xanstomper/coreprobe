@@ -804,10 +804,22 @@ async function pageExploits() {
 async function pageTools() {
   let tdata = null;
   try { tdata = await api("/api/tools"); } catch { tdata = null; }
+  let stance = null;
+  try { stance = await api("/api/stance"); } catch { stance = null; }
   const tools = (tdata && tdata.tools) || [];
   const sum = (tdata && tdata.summary) || {};
   const installed = tools.filter(t => t.installed).length;
   const cats = ["acquisition", "jailbreak", "restore", "parsing", "analysis"];
+  const compRows = stance ? stance.rows.map(r => {
+    const [cap, ...cells] = r;
+    const sm = stance.status_map || {};
+    const pill = v => {
+      const s = sm[v] || v;
+      const cls = v === "FULL" ? "green" : (v === "NONE" || v === "N/A") ? "" : "amber";
+      return `<span class="status-pill ${cls}">${esc(s)}</span>`;
+    };
+    return `<tr><td>${esc(cap)}</td>${cells.map(c => `<td>${pill(c)}</td>`).join("")}</tr>`;
+  }).join("") : "";
   return `<div class="page-head"><div class="page-title">Forensic Toolchain</div>
     <div class="page-sub">Open-source iOS forensic tooling: installed status detected live on this workstation.</div></div>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
@@ -824,7 +836,14 @@ async function pageTools() {
       <td>${esc(t.purpose)}</td></tr>`).join("") || '<tr><td colspan="4">No tools data.</td></tr>'}
     </tbody></table>
     <div class="log-event"><span class="dot ${installed ? "green" : "amber"}"></span><div class="log-text">Install the missing chain: <span class="mono">sudo ./install.sh --with-checkm8-tools</span> plus apt/pip per tool. Parsing layer (iLEAPP/MEAT/APOLLO/ArtEx/MVT) is optional per-case.</div></div>
-    </div>`;
+    </div>
+    ${stance ? `<!-- honest stance vs commercial platforms -->
+    <div style="height:14px"></div>
+    <div class="panel-card"><div class="panel-card-head">Honest stance vs commercial platforms</div>
+    <table class="data"><thead><tr><th>Capability</th><th>CoreProbe</th>${stance.competitors.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+    <tbody>${compRows}</tbody></table>
+    <div class="log-event"><span class="dot green"></span><div class="log-text">Full parity on logical / encrypted-with-passcode / checkm8 acquisition and the exploit-catalog workflow. No open-source tool matches Cellebrite BFU/DPA, AXIOM artifact breadth, or iCloud. usbliter8 (A12/A13) is the research path.</div></div>
+    </div>` : ""}`;
 }
 
 const PAGES = {

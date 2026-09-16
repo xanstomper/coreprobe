@@ -464,6 +464,13 @@ class Handler(BaseHTTPRequestHandler):
                 "tools": forensics.detect(),
                 "summary": forensics.summary(),
             }))
+        elif path == "/api/stance":
+            from .. import forensics
+            self._send(200, json.dumps({
+                "competitors": forensics.COMPETITORS,
+                "rows": forensics.STANCE_ROWS,
+                "status_map": forensics._STATUS,
+            }))
         elif path.startswith("/api/icon/"):
             bundle = unquote(path[len("/api/icon/"):])
             p = _icon(bundle)
