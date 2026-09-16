@@ -16,6 +16,20 @@ silicon envelope plus the instrument class that produced it.
 
 A14+: **nothing public.** That is a fact, not a gap in our catalog.
 
+## Our own BFU decryption stack (the payoff end of the pipeline)
+```
+keybag unwrap <bag> --uid-key <key>      -> class keys (AES-ECB with UID key)
+acquire bfu-decrypt <file> --inspect <cprotect>
+acquire bfu-decrypt <file> --cprotect + --class-key
+    -> per-file key unwrap (AES-ECB with class key) -> AES-CBC sector decrypt
+```
+Documented iOS data-protection pipeline, self-tested by round-trips.
+Applies where class keys are obtainable: checkm8 A7-A11 (UID-key AES from
+the pwned engine), escrow/backup keybags. On A12+ the keys stay in the
+SEP, so this stack is the recovery end of the A7-A11 + escrow flows and a
+target for the fuzz research. Validate against a real device fixture
+before case work (Apple does not publish the format).
+
 ## Research workbench (the "make ours" pipeline)
 ```
 dfu-usbmon.sh  -> usbmon text capture

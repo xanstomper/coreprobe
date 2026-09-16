@@ -38,6 +38,7 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | Ecosystem (CI workflow, CONTRIBUTING, SECURITY, MIT LICENSE) | GitHub Actions | ✅ |
 | Silicon workspace (`silicon` - public envelope + lab kit: DFU capture, identity, session log) | Python + bash + usbmon | ✅ |
 | DFU research pipeline (`silicon --trace/--corpus`, `dfu-fuzz.py`, `--notebook` research log) | Python + pyusb + usbmon | ✅ |
+| BFU decryption engine (`keybag unwrap`, `acquire bfu-decrypt` - cprotect + AES-CBC sector decrypt) | Python + pycryptodome | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |

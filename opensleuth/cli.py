@@ -1353,6 +1353,63 @@ def render_escrow_summary(esc):
     return "\n".join(lines)
 
 
+def cmd_keybag_unwrap(args):
+    import json
+    from .keybag import analyze as _kb_analyze
+    from .dataprotection import unwrap_class_key
+    bag = _kb_analyze(args.file)
+    key_material = args.uid_key
+    try:
+        if Path(key_material).exists():
+            uid = Path(key_material).read_bytes()[:32]
+        else:
+            uid = bytes.fromhex(key_material.replace(" ", ""))
+    except (ValueError, OSError) as exc:
+        sys.exit(f"uid key invalid: {exc}")
+    out = {}
+    for k in bag["keys"]:
+        if not k.get("key_present") or not k.get("key"):
+            continue
+        try:
+            class_key = unwrap_class_key(k["key"], uid)
+            out[k["class_name"]] = {"class": k["class"], "key": class_key.hex()}
+        except Exception as exc:  # noqa: BLE001
+            out[k["class_name"]] = {"class": k["class"], "error": str(exc)}
+    dest = Path(args.out) if args.out else Path(args.file).with_name("class-keys.json")
+    dest.write_text(json.dumps(out, indent=2))
+    print(f"unwrapped {len(out)} key(s) -> {dest}")
+    for name, v in out.items():
+        if "error" in v:
+            print(f"  ! {name}: {v['error']}")
+        else:
+            print(f"  + {name}  {v['key'][:16]}...")
+
+
+def cmd_bfu_decrypt(args):
+    from .dataprotection import (decrypt_case, parse_cprotect,
+                                 render_inspect, unwrap_class_key)
+    if args.inspect:
+        blob = Path(args.inspect).read_bytes()
+        print(render_inspect(parse_cprotect(blob, source=args.inspect)))
+        return
+    to_hex = lambda v: bytes.fromhex(v.replace(" ", "")) if v else None
+    if args.key:
+        class_key = to_hex(args.key)
+        r = decrypt_case(args.file, class_key, sector=args.sector, out=args.out)
+        print(f"decrypted {r['size']} bytes -> {r['out']}")
+        return
+    if args.cprotect and args.class_key:
+        blob = Path(args.cprotect).read_bytes()
+        cp = parse_cprotect(blob, source=args.cprotect)
+        print(render_inspect(cp))
+        class_key = to_hex(args.class_key)
+        r = decrypt_case(args.file, class_key, cprotect_blob=blob,
+                         sector=args.sector, out=args.out)
+        print(f"decrypted {r['size']} bytes (class {r['class']}) -> {r['out']}")
+        return
+    sys.exit("bfu-decrypt: use --inspect, --key, or --cprotect + --class-key")
+
+
 def cmd_keybag_status(args):
     from .keybag import KeybagError, render_status
     try:
@@ -1585,6 +1642,21 @@ def main(argv=None):
     ke = kb_sub.add_parser("escrow", help="extract keybags embedded in an iTunes escrow record (plist)")
     ke.add_argument("file")
     ke.set_defaults(fn=cmd_keybag_escrow)
+    ku = kb_sub.add_parser("unwrap", help="unwrap keybag class keys with the device UID key (our own BFU decryption stack)")
+    ku.add_argument("file", help="keybag file (systembag.kb / userbag.kb / backupbag.kb)")
+    ku.add_argument("--uid-key", required=True, help="UID key: hex string or path to a key file (from gaster keys / ipwndfu)")
+    ku.add_argument("--out", help="write class-keys.json here (default: next to the keybag)")
+    ku.set_defaults(fn=cmd_keybag_unwrap)
+
+    bd = acq_sub.add_parser("bfu-decrypt", help="BFU decryption engine: inspect cprotect or decrypt a pulled file with a class key")
+    bd.add_argument("file", help="pulled (encrypted) file")
+    bd.add_argument("--inspect", metavar="CPROTECT", help="parse a com.apple.system.cprotect blob file")
+    bd.add_argument("--cprotect", metavar="BLOB", help="cprotect blob file for per-file key unwrap")
+    bd.add_argument("--key", help="class key (32-byte hex) - or use --cprotect + --class-key")
+    bd.add_argument("--class-key", help="class key hex used with --cprotect to unwrap the per-file key")
+    bd.add_argument("--sector", type=int, default=4096)
+    bd.add_argument("--out", help="output file (default: <file>.dec)")
+    bd.set_defaults(fn=cmd_bfu_decrypt)
 
     from . import escrow
     es = sub.add_parser("escrow", help="escrow/paired-computer acquisition (passcode-free path, works on ALL models)")

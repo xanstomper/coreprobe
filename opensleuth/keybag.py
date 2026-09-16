@@ -89,6 +89,7 @@ def parse_keybag(data: bytes, source: str = "<bytes>") -> dict[str, Any]:
             "class_name": CLASS_NAMES.get(prot_class, f"class-{prot_class}"),
             "key_present": bool(key) and any(key),
             "key_len": len(key),
+            "key": key,
         })
     return {
         "source": source,
