@@ -16,6 +16,19 @@ silicon envelope plus the instrument class that produced it.
 
 A14+: **nothing public.** That is a fact, not a gap in our catalog.
 
+## Research workbench (the "make ours" pipeline)
+```
+dfu-usbmon.sh  -> usbmon text capture
+opensleuth silicon --trace <capture> --corpus corpus.csv
+    (decode DFU requests, flag anomalies, build mutation corpus)
+dfu-fuzz.py corpus.csv <iters>   -> mutate + drive a real device via pyusb;
+    device death/hang/stall are the signals that precede bugs
+opensleuth silicon --notebook <lab> --note "..."  -> timestamped research log
+```
+The companies got their capability from exactly this loop: capture the
+protocol, fuzz the boundary conditions, log what breaks. The workbench
+does not manufacture a bypass - it is the instrument that finds one.
+
 ## Lab kit (opensleuth silicon --lab <dir>)
 - `dfu-usbmon.sh` - passive DFU USB capture (the checkm8/usbliter8 trace class)
 - `dfu-identify.sh` - pwned-DFU introspection (serial/ecid/boardconfig/nonce)

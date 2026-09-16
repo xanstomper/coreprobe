@@ -805,6 +805,24 @@ def cmd_silicon(args):
     """
     from .silicon import render as silicon_render
 
+    trace_f = getattr(args, "trace", None)
+    if trace_f:
+        from .dfutrace import analyze, build_corpus, parse_usbmon_text
+        from .dfutrace import render as trace_render
+        from .dfutrace import write_corpus
+        events = parse_usbmon_text(Path(trace_f).read_text(errors="replace"))
+        print(trace_render(analyze(events)))
+        corpus_out = getattr(args, "corpus", None)
+        if corpus_out:
+            n = write_corpus(build_corpus(events), corpus_out)
+            print(f"corpus: {n} requests -> {corpus_out}")
+        return
+    nb_dir = getattr(args, "notebook", None)
+    if nb_dir:
+        from .silicon import notebook, render_notebook
+        nb = notebook(nb_dir, note=getattr(args, "note", "") or None)
+        print(render_notebook(nb))
+        return
     lab_dir = getattr(args, "lab", None)
     if lab_dir:
         from .silicon import lab_kit, render_lab
@@ -1450,6 +1468,10 @@ def main(argv=None):
     sc.add_argument("--detailed", action="store_true", help="full details per exploit")
     sc.add_argument("--lab", metavar="DIR", help="generate the silicon research lab kit (DFU capture + identity + session log)")
     sc.add_argument("chip", nargs="?", default="", help="filter to a chip (A4..A16); omit for the full catalog")
+    sc.add_argument("--trace", metavar="FILE", help="analyze a usbmon DFU capture (text log)")
+    sc.add_argument("--corpus", metavar="OUT", help="write the fuzz corpus CSV (with --trace)")
+    sc.add_argument("--notebook", metavar="LABDIR", help="research notebook: list or append notes")
+    sc.add_argument("--note", default="", help="note to append (with --notebook)")
     sc.set_defaults(fn=cmd_silicon)
     ex = sub.add_parser("exploits", help="complete public exploit inventory with hardware requirements")
     ex.add_argument("chip", nargs="?", default="", help="filter to a chip (A4..A16)")

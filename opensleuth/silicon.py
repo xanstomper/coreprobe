@@ -272,6 +272,40 @@ LAB_FILES = {
     "log() { echo \"[$(date -u +%H:%M:%SZ)] $*\" >> \"$LOG\"; }\n"
     "cmd() { log \"> $*\"; \"$@\" >> \"$LOG\" 2>&1; log \"< exit $?\"; }\n"
     "echo \"log -> $LOG  (add steps with: cmd <your-command>)\"\n",
+    "dfu-fuzz.py": "#!/usr/bin/env python3\n"
+    "# Mutation fuzzer for Apple DFU control transfers (research use).\n"
+    "# Loads corpus.csv (opensleuth silicon trace --corpus), mutates\n"
+    "# wLength/wValue/wIndex/bRequest, drives a REAL device via pyusb,\n"
+    "# and logs device death/hang/stall - the signals before bugs.\n"
+    "# SAFETY: lawful devices only. A crash may require re-entering DFU.\n"
+    "import sys, time\n"
+    "sys.path.insert(0, 'REPO')  # patched at generation\n"
+    "import usb.core, usb.util  # noqa\n"
+    "from opensleuth.dfutrace import read_corpus\n"
+    "from opensleuth.dfufuzz import run_fuzz\n"
+    "class LiveDevice:\n"
+    "    def __init__(self, vid=0x05ac, pid=0x1227):\n"
+    "        self.dev = usb.core.find(idVendor=vid, idProduct=pid)\n"
+    "        if self.dev is None:\n"
+    "            print('apple dfu device not found (vid 0x05ac pid 0x1227/1222)'); sys.exit(2)\n"
+    "    def alive(self):\n"
+    "        try:\n"
+    "            return usb.core.find(idVendor=0x05ac) is not None\n"
+    "        except Exception:\n"
+    "            return False\n"
+    "    def ctrl_transfer(self, bm, b, wv, wi, wl, timeout):\n"
+    "        return self.dev.ctrl_transfer(bm, b, wv, wi, wl or None, timeout=timeout)\n"
+    "def main():\n"
+    "    corpus_path = sys.argv[1] if len(sys.argv) > 1 else 'corpus.csv'\n"
+    "    iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 300\n"
+    "    dev = LiveDevice()\n"
+    "    corpus = read_corpus(corpus_path)\n"
+    "    print(f'fuzzing {len(corpus)} requests x {iterations} iterations')\n"
+    "    res = run_fuzz(dev, corpus, iterations=iterations, log=print)\n"
+    "    print('sent', res['sent'], '| crashes', res['crashes'], '| hangups', res['hangups'])\n"
+    "    print('interesting responses:', len(res['interesting']))\n"
+    "if __name__ == '__main__':\n"
+    "    main()\n",
     "README.md": """# CoreProbe silicon research lab kit
 
 For lawful research on devices under your authority.
@@ -288,6 +322,8 @@ Process:
   3. Enter DFU; pwn (gaster A7-A11 / RP2350 usbliter8 A12/A13)
   4. dfu-identify.sh in pwned DFU
   5. irecovery flashes + env commands, all session-logged
+  6. opensleuth silicon trace <capture> --corpus corpus.csv
+  7. python3 dfu-fuzz.py corpus.csv 300   (mutation fuzzing, lawful devices)
 
 Honest envelope (opensleuth silicon):
   - A7-A11: checkm8 (full DFU control)
@@ -321,6 +357,31 @@ def lab_kit(out: str | Path, chip: str = "A13") -> dict[str, Any]:
     (out / "chip-notes.md").write_text("\n".join(notes))
     written.append("chip-notes.md")
     return {"out": str(out), "files": written, "chip": chip}
+
+
+def notebook(lab_dir: str | Path, note: str | None = None,
+             notebook_name: str = "research.json") -> dict[str, Any]:
+    """Append a timestamped note to the lab's research notebook."""
+    lab_dir = Path(lab_dir)
+    lab_dir.mkdir(parents=True, exist_ok=True)
+    path = lab_dir / notebook_name
+    entries = []
+    if path.exists():
+        import json
+        entries = json.loads(path.read_text())
+    if note:
+        entries.append({"ts": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(timespec="seconds"),
+            "note": note})
+        path.write_text(__import__("json").dumps(entries, indent=2))
+    return {"notebook": str(path), "entries": entries}
+
+
+def render_notebook(nb: dict[str, Any]) -> str:
+    lines = [f"research notebook: {nb['notebook']}  ({len(nb['entries'])} entries)", ""]
+    for e in nb["entries"]:
+        lines.append(f"  [{e['ts']}] {e['note']}")
+    return "\n".join(lines)
 
 
 def render_lab(r: dict[str, Any]) -> str:
