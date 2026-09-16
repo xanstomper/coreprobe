@@ -26,6 +26,8 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | Artifact parsers (SMS, contacts, calls, Safari, prefs) | Python stdlib | ✅ |
 | Timeline + HTML/CSV/JSON report | Python `html`/`csv`/`json` | ✅ |
 | Encrypted backup + keychain decryption (`acquire --encrypted --password --unback`) | pyiosbackup | ✅ |
+| Forensic toolchain catalog (`opensleuth tools`, live installed-status) | Python stdlib | ✅ |
+| Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |
 | iCloud acquisition | roadmap | ⏳ |
 
 ## Install / requirements

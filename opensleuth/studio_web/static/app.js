@@ -24,6 +24,7 @@ const ICONS = {
   bell: I('<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>'),
   phone: I('<rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/>'),
   tablet: I('<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="10" y1="18" x2="14" y2="18"/>'),
+  tools: I('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
   exploits: I('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>'),
 };
 
@@ -33,7 +34,7 @@ const NAV = [
   ["browser", "Browser"], ["chats", "Chats"], ["cloud", "Cloud"], ["contacts", "Contacts"],
   ["calendars", "Calendars"], ["calls", "Calls"], ["location", "Location"], ["media", "Media"],
   ["messages", "Messages"], ["files", "Files"], ["forensics", "Forensics"], ["reports", "Reports"],
-  ["exploits", "Exploits"], ["settings", "Settings"],
+  ["exploits", "Exploits"], ["tools", "Tools"], ["settings", "Settings"],
 ];
 const SECTION_META = {
   devices: ["Devices", "Physical and logical device data"],
@@ -51,6 +52,7 @@ const SECTION_META = {
   forensics: ["Forensics", "Recovered and deleted data"],
   reports: ["Reports", "Generated reports and exports"],
   exploits: ["Exploits", "Public iOS exploit catalog and exposure"],
+  tools: ["Tools", "Open-source forensic toolchain + install status"],
   settings: ["Settings", "Configuration and preferences"],
 };
 
@@ -799,21 +801,48 @@ async function pageExploits() {
     </div>`;
 }
 
+async function pageTools() {
+  let tdata = null;
+  try { tdata = await api("/api/tools"); } catch { tdata = null; }
+  const tools = (tdata && tdata.tools) || [];
+  const sum = (tdata && tdata.summary) || {};
+  const installed = tools.filter(t => t.installed).length;
+  const cats = ["acquisition", "jailbreak", "restore", "parsing", "analysis"];
+  return `<div class="page-head"><div class="page-title">Forensic Toolchain</div>
+    <div class="page-sub">Open-source iOS forensic tooling: installed status detected live on this workstation.</div></div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+      ${cats.map(c => { const cc = (sum.by_category && sum.by_category[c]) || {installed:0,total:0};
+        return `<div class="metric-card"><div class="metric-body"><div class="metric-label">${c}</div>
+        <div class="metric-value">${cc.installed}/${cc.total}</div></div></div>`; }).join("")}
+    </div>
+    <div class="panel-card"><div class="panel-card-head">Toolchain (${installed}/${tools.length} installed)</div>
+    <div class="filter-bar"><input class="form-input" id="tool-filter" placeholder="Filter tools..." style="width:260px" oninput="filterTable('tp-Tools', this.value)">
+      <button class="btn" onclick="location.hash='tools';render()">Refresh</button></div>
+    <table class="data" id="tp-Tools"><thead><tr><th>Tool</th><th>Category</th><th>Status</th><th>Purpose</th></tr></thead><tbody>
+    ${tools.map(t => `<tr><td><b>${esc(t.name)}</b></td><td><span class="status-pill">${t.cat}</span></td>
+      <td>${t.installed ? '<span class="status-pill green">installed</span>' : '<span class="status-pill amber">missing</span>'}</td>
+      <td>${esc(t.purpose)}</td></tr>`).join("") || '<tr><td colspan="4">No tools data.</td></tr>'}
+    </tbody></table>
+    <div class="log-event"><span class="dot ${installed ? "green" : "amber"}"></span><div class="log-text">Install the missing chain: <span class="mono">sudo ./install.sh --with-checkm8-tools</span> plus apt/pip per tool. Parsing layer (iLEAPP/MEAT/APOLLO/ArtEx/MVT) is optional per-case.</div></div>
+    </div>`;
+}
+
 const PAGES = {
   dashboard: pageDashboard, devices: pageDevices, applications: pageApplications,
   browser: pageBrowser, chats: pageChats, cloud: pageCloud, contacts: pageContacts,
   calendars: pageCalendars, calls: pageCalls, location: pageLocation, media: pageMedia,
   messages: pageMessages, files: pageFiles, forensics: pageForensics, reports: pageReports,
-  exploits: pageExploits, settings: pageSettings,
+  exploits: pageExploits, tools: pageTools, settings: pageSettings,
 };
-function render() {
+async function render() {
   const h = (location.hash || "#dashboard").slice(1);
   currentHash = PAGES[h] ? h : "dashboard";
   buildNav(); navCounts();
   const bannerPages = ["browser", "chats", "cloud", "contacts", "calendars", "calls",
                        "location", "media", "messages", "files", "forensics"];
+  const html = await PAGES[currentHash]();
   document.getElementById("page").innerHTML =
-    (bannerPages.includes(currentHash) ? detectionBanner() : "") + PAGES[currentHash]();
+    (bannerPages.includes(currentHash) ? detectionBanner() : "") + (html || "");
   document.querySelectorAll("[data-nav]").forEach(el => el.onclick = () => location.hash = el.dataset.nav);
   renderCasePanel();
 }

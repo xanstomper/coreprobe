@@ -1067,6 +1067,16 @@ def cmd_dump(args):
         print("warnings:", *errs, sep="\n  - ")
 
 
+def cmd_tools(args):
+    from . import forensics
+    if args.json:
+        import json
+        print(json.dumps(forensics.detect() if not args.installed else
+                         [r for r in forensics.detect() if r["installed"]], indent=2))
+        return
+    print(forensics.render_tools(installed_only=args.installed))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensleuth", description="open-source iOS forensic triage")
     ap.add_argument("--version", action="version", version=f"opensleuth {__version__}")
@@ -1188,6 +1198,12 @@ def main(argv=None):
 
     from . import cxx
     cxx.add_parser(sub)
+
+    from . import forensics
+    tk = sub.add_parser("tools", help="forensic toolchain catalog with live installed-status detection")
+    tk.add_argument("--installed", action="store_true", help="only show installed tools")
+    tk.add_argument("--json", action="store_true", help="machine-readable output")
+    tk.set_defaults(fn=cmd_tools)
 
     args = ap.parse_args(argv)
     args.fn(args)

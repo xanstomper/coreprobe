@@ -458,6 +458,12 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     payload["recommendation"] = []
             self._send(200, json.dumps(payload, default=str))
+        elif path == "/api/tools":
+            from .. import forensics
+            self._send(200, json.dumps({
+                "tools": forensics.detect(),
+                "summary": forensics.summary(),
+            }))
         elif path.startswith("/api/icon/"):
             bundle = unquote(path[len("/api/icon/"):])
             p = _icon(bundle)
