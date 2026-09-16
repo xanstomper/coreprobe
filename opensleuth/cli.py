@@ -805,7 +805,13 @@ def cmd_silicon(args):
     """
     from .silicon import render as silicon_render
 
-    print(silicon_render(getattr(args, "chip", ""), detailed=getattr(args, "detailed", False)))
+    lab_dir = getattr(args, "lab", None)
+    if lab_dir:
+        from .silicon import lab_kit, render_lab
+        print(render_lab(lab_kit(lab_dir, chip=getattr(args, "chip", "") or "A13")))
+        return
+    print(silicon_render(getattr(args, "chip", "") or args.chip,
+                         detailed=getattr(args, "detailed", False)))
 
 
 def cmd_exploits(args):
@@ -1440,8 +1446,10 @@ def main(argv=None):
     m.add_argument("ios", help="e.g. 16.6.1")
     m.set_defaults(fn=cmd_matrix)
     sc = sub.add_parser("silicon", help="public bootrom/SEP exploit envelope (checkm8, Blackbird, usbliter8)")
+    sc.add_argument("--chip", help="filter the envelope to a chip (e.g. A13)")
+    sc.add_argument("--detailed", action="store_true", help="full details per exploit")
+    sc.add_argument("--lab", metavar="DIR", help="generate the silicon research lab kit (DFU capture + identity + session log)")
     sc.add_argument("chip", nargs="?", default="", help="filter to a chip (A4..A16); omit for the full catalog")
-    sc.add_argument("--detailed", action="store_true", help="one capability per line")
     sc.set_defaults(fn=cmd_silicon)
     ex = sub.add_parser("exploits", help="complete public exploit inventory with hardware requirements")
     ex.add_argument("chip", nargs="?", default="", help="filter to a chip (A4..A16)")

@@ -54,6 +54,8 @@ A14-A17 Pro to 17.3.1, arm64 A8-A11 to 18.7.1 - see `opensleuth exploits`).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from typing import Any, Optional
 
 # --------------------------------------------------------------------------
@@ -224,4 +226,107 @@ def render(chip: str = "", detailed: bool = False) -> str:
     lines.append("")
     lines.append("Envelope summary: checkm8 (A7-A11) + Blackbird (SEP, A10/T2) + usbliter8 (A12/A13)")
     lines.append("cover every PUBLIC bootrom/SEP route on iPhones. A14+ has none public.")
+    return "\n".join(lines)
+
+# --------------------------------------------------------------------------
+# Silicon research lab kit: capture + instrumentation (does NOT ship a
+# bypass; it ships the instrument class that produced the entries above).
+# --------------------------------------------------------------------------
+
+LAB_FILES = {
+    "dfu-usbmon.sh": "#!/usr/bin/env bash\n"
+    "# Passive DFU USB capture (usbmon). Run BEFORE entering DFU.\n"
+    "# Captures every USB packet against the Apple DFU interface - the same\n"
+    "# kind of trace that produced checkm8 (overflow) and usbliter8 (DWC2\n"
+    "# DMA underflow). Stops with Ctrl-C. Output: dfu-capture-<ts>.pcapng\n"
+    "set -euo pipefail\n"
+    "TS=$(date +%Y%m%d-%H%M%S)\n"
+    "OUT=${1:-dfu-capture-$TS.pcapng}\n"
+    "echo \"== DFU USB capture -> $OUT\"\n"
+    "sudo modprobe usbmon 2>/dev/null || true\n"
+    "BUS=1\n"
+    "if [ ! -r /sys/kernel/debug/usb/usbmon/$BUS ]; then\n"
+    "  echo 'usbmon not readable; try: sudo mount -t debugfs none /sys/kernel/debug'\n"
+    "  exit 1\n"
+    "fi\n"
+    "sudo tcpdump -i usbmon$BUS -U -w \"$OUT\" &\n"
+    "TPID=$!\n"
+    "trap \"sudo kill $TPID 2>/dev/null || true\" EXIT\n"
+    "echo 'capturing... (Ctrl-C to stop; enter DFU when ready)'\n"
+    "wait $TPID\n",
+    "dfu-identify.sh": "#!/usr/bin/env bash\n"
+    "# Pwned/DFU device introspection: chip identity, board config, nonces.\n"
+    "set -uo pipefail\n"
+    "OUT=${1:-.}\n"
+    "mkdir -p \"$OUT\"\n"
+    "for env in serial ecid boardid boardconfig cpuid nonce; do\n"
+    "  echo \"== getenv $env\"\n"
+    "  irecovery -q -c \"getenv $env\" 2>&1 || true\n"
+    "done > \"$OUT/dfu-identify-$(date +%Y%m%d-%H%M%S).log\"\n"
+    "echo \"identity log written to $OUT\"\n",
+    "session-log.sh": "#!/usr/bin/env bash\n"
+    "# Research session logger: timestamps every step into a case-ready log.\n"
+    "set -uo pipefail\n"
+    "LOG=${1:-session.log}\n"
+    "echo \"== CoreProbe silicon research session $(date -u +%Y-%m-%dT%H:%M:%SZ)\" > \"$LOG\"\n"
+    "log() { echo \"[$(date -u +%H:%M:%SZ)] $*\" >> \"$LOG\"; }\n"
+    "cmd() { log \"> $*\"; \"$@\" >> \"$LOG\" 2>&1; log \"< exit $?\"; }\n"
+    "echo \"log -> $LOG  (add steps with: cmd <your-command>)\"\n",
+    "README.md": """# CoreProbe silicon research lab kit
+
+For lawful research on devices under your authority.
+
+Kit contents:
+  - dfu-usbmon.sh    passive DFU USB capture (usbmon) - the trace class
+                     that produced checkm8 and usbliter8
+  - dfu-identify.sh  pwned-DFU introspection (serial/ecid/boardconfig/nonce)
+  - session-log.sh   timestamped research session log
+
+Process:
+  1. session-log.sh
+  2. dfu-usbmon.sh (BEFORE entering DFU)
+  3. Enter DFU; pwn (gaster A7-A11 / RP2350 usbliter8 A12/A13)
+  4. dfu-identify.sh in pwned DFU
+  5. irecovery flashes + env commands, all session-logged
+
+Honest envelope (opensleuth silicon):
+  - A7-A11: checkm8 (full DFU control)
+  - A10/A10X/T2: + Blackbird SEPROM race = FULL BFU keybag chain
+  - A12/A13: usbliter8 (SecureROM code exec, SEP untouched)
+  - A14+: NO PUBLIC silicon exploit. This kit cannot change that.
+A working A12+ SEP bypass would be an unpublished vulnerability found by
+original research - not a download.
+""",
+}
+
+
+def lab_kit(out: str | Path, chip: str = "A13") -> dict[str, Any]:
+    """Generate the silicon research lab kit into a directory."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, content in LAB_FILES.items():
+        f = out / name
+        f.write_text(content)
+        if name.endswith(".sh"):
+            f.chmod(0o755)
+        written.append(name)
+    hits = for_chip(chip)
+    notes = [f"# {chip} silicon notes", ""]
+    for h in hits:
+        notes.append(f"## {h['name']} ({h['year']})")
+        notes.append(f"  {h['linux']}")
+        notes.append(f"  BFU: {h['bfu']}")
+        notes.append("")
+    (out / "chip-notes.md").write_text("\n".join(notes))
+    written.append("chip-notes.md")
+    return {"out": str(out), "files": written, "chip": chip}
+
+
+def render_lab(r: dict[str, Any]) -> str:
+    lines = [f"silicon lab kit generated: {r['out']} (chip {r['chip']})", ""]
+    for f in r["files"]:
+        lines.append(f"  - {f}")
+    lines += ["", "process: session-log.sh -> dfu-usbmon.sh -> enter DFU -> pwn",
+              "-> dfu-identify.sh -> irecovery flows"]
     return "\n".join(lines)

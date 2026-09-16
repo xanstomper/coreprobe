@@ -36,6 +36,7 @@ iPhone (USB) ──> acquire ──> backup dir / media dir ──> dump ──>
 | Court-ready reporting (`certify` - native-hash manifest + HMAC seal + verify) | Python + native core | ✅ |
 | iLEAPP artifact bridge (`ileapp run/breath` - 100+ parsers, external engine) | Python + iLEAPP | ✅ |
 | Ecosystem (CI workflow, CONTRIBUTING, SECURITY, MIT LICENSE) | GitHub Actions | ✅ |
+| Silicon workspace (`silicon` - public envelope + lab kit: DFU capture, identity, session log) | Python + bash + usbmon | ✅ |
 | iCloud account acquisition (`acquire icloud` - warrant-gated, pyicloud) | Python + pyicloud | ✅ |
 | App artifact breadth (`appcatalog` - 44-app catalog, sqlite inventory, CSV extract) | Python stdlib + sqlite3 | ✅ |
 | Native C++ core (`opensleuth cxx` - hash/manifest/mbdb/bench) | C++17 + CMake | ✅ |
