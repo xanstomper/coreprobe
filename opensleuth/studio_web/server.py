@@ -470,6 +470,7 @@ class Handler(BaseHTTPRequestHandler):
                 "competitors": forensics.COMPETITORS,
                 "rows": forensics.STANCE_ROWS,
                 "status_map": forensics._STATUS,
+                "gaps": forensics.GAP_LINES,
             }))
         elif path == "/api/bfu":
             qs = parse_qs(parsed.query)

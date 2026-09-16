@@ -399,7 +399,63 @@ def cmd_acquire_bfu(args):
         print("  checkm8 output:", res["checkm8"]["outcome"][:300])
 
     # per-class expectations + optional payload-driven ramdisk extraction
-    from .bfu import render_expectations, render_usbliter8_plan, run_ramdisk_extract
+    from .bfu import (render_expectations, render_usbliter8_plan,
+                      render_yield_card, run_ramdisk_extract, yield_card,
+                      bfu_runbook)
+    chip_used = res.get("checkm8", {}).get("chip", "?")
+    if getattr(args, "yield_card", False):
+        from .usb import usb_state as _us
+        snap = _us()
+        card = yield_card(
+            chip=chip_used or "?",
+            ios=getattr(args, "ios", "") or "",
+            device_flags={"attached": bool(snap.get("devices")),
+                          "dfu": snap.get("dfu"), "recovery": snap.get("recovery"),
+                          "pwnd": snap.get("pwnd")},
+            tooling={"gaster": bool(shutil.which("gaster")),
+                     "palera1n": bool(shutil.which("palera1n")),
+                     "usbliter8ctl": bool(shutil.which("usbliter8ctl")),
+                     "sshpass": bool(shutil.which("sshpass"))})
+        res["yield_card"] = card
+        print()
+        print(render_yield_card(card))
+    runbook_path = getattr(args, "runbook", None)
+    if runbook_path:
+        (Path(runbook_path)).write_text(bfu_runbook(chip=chip_used or "?",
+                                                    ios=getattr(args, "ios", "") or "",
+                                                    case_dir=str(out)))
+        print("runbook written:", runbook_path)
+    if getattr(args, "watch", False):
+        from .usb import watch_dfu
+        print()
+        print("[watch] waiting for DFU entry (start the DP/vol-down sequence)...")
+        snap = watch_dfu(timeout=float(getattr(args, "watch_timeout", 300)))
+        res["watch"] = snap
+        if snap.get("dfu"):
+            print("[watch] DFU detected - pwn now")
+            res["checkm8"]["tool"] = "gaster"
+            try:
+                p = subprocess.run(["gaster", "pwn"], capture_output=True,
+                                   text=True, timeout=120)
+                res["checkm8"]["outcome"] = (p.stdout or p.stderr)[-400:]
+                pwnd = p.returncode == 0
+            except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+                res["checkm8"]["outcome"] = f"pwn failed: {exc}"
+                pwnd = False
+            if pwnd:
+                print("  pwnd - continuing chain")
+                if getattr(args, "keys", False):
+                    from .bfu import capture_aes_keys
+                    k = capture_aes_keys(out, tool="gaster")
+                    res["aes_keys"] = k
+                    print("  aes keys:", "captured" if k.get("ok") else k.get("error"))
+                if getattr(args, "ramdisk", None):
+                    print("  [ramdisk] payload dir:", args.ramdisk)
+                    r = run_ramdisk_extract(args.ramdisk, out)
+                    res["ramdisk"] = r
+                    print("  ramdisk:", r.get("ok"), r.get("error") or r.get("note", ""))
+        else:
+            print("[watch] no DFU entry within timeout; chain not started")
     route = getattr(args, "route", "").lower()
     if route == "usbliter8":
         print()
@@ -1190,6 +1246,12 @@ def cmd_appcatalog_extract(args):
     print(f"{r['rows']:,} rows x {len(r['columns'])} cols -> {r['csv']}")
 
 
+def cmd_escrow_sweep(args):
+    from . import escrow
+    r = escrow.sweep(args.dir, args.out)
+    print(escrow.render_sweep(r))
+
+
 def cmd_escrow_find(args):
     from . import escrow
     print(escrow.render_find(escrow.find_records(args.dir)))
@@ -1280,6 +1342,10 @@ def main(argv=None):
     bfu.add_argument("--ramdisk", help="payload dir (iBSS/iBEC/ramdisk/devicetree/trustcache) to run the checkm8 BFU ramdisk pull after pwn")
     bfu.add_argument("--force", action="store_true", help="attempt checkm8 pwn even when no DFU/recovery state is detected")
     bfu.add_argument("--keys", action="store_true", help="capture the device AES keyset (gaster keys) from the pwned device")
+    bfu.add_argument("--watch", action="store_true", help="wait for DFU entry, then auto-run pwn -> keys -> ramdisk chain")
+    bfu.add_argument("--runbook", help="write a markdown BFU runbook for the case to this file and exit")
+    bfu.add_argument("--yield-card", action="store_true", help="print the per-device BFU yield card")
+    bfu.add_argument("--watch-timeout", type=float, default=300.0, help="seconds to wait for DFU in --watch mode")
     bfu.add_argument("--route", choices=["usbliter8", ""], default="", help="show the usbliter8 BFU playbook for A12/A13")
     bfu.set_defaults(fn=cmd_acquire_bfu)
     c8 = acq_sub.add_parser("checkm8", help="zero-hardware bootrom route (A7-A11): gaster pwn -> palera1n/PongoOS -> FS + BFU-partial")
@@ -1435,6 +1501,10 @@ def main(argv=None):
     esu.add_argument("backup")
     esu.add_argument("--out", required=True)
     esu.set_defaults(fn=cmd_escrow_unlock)
+    ess = es_sub.add_parser("sweep", help="batch hunt: find records + try passcode-free unlock against sibling backups")
+    ess.add_argument("dir")
+    ess.add_argument("--out", required=True)
+    ess.set_defaults(fn=cmd_escrow_sweep)
 
     args = ap.parse_args(argv)
     args.fn(args)

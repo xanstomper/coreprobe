@@ -181,6 +181,62 @@ def unlock_backup(record: str | Path, backup_dir: str | Path, out: str | Path,
     }
 
 
+def sweep(root: str | Path, out: str | Path, pyiosbackup_module: Any = None) -> dict[str, Any]:
+    """Batch escrow hunt over case materials.
+
+    Finds every escrow record/backup keybag, then for each pair of
+    (record, sibling backup dir) attempts the passcode-free unlock.
+    Returns one row per attempt with honest status.
+    """
+    root = Path(root)
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    found = find_records(root)
+    backup_dirs = [p for p in sorted(root.rglob("*")) if p.is_dir() and (p / "Manifest.plist").exists()]
+    rows = []
+    for f in found:
+        rec = Path(f["path"])
+        targets = backup_dirs or [p for p in [root] if (p / "Manifest.plist").exists()]
+        if not targets:
+            rows.append({"record": str(rec), "backup": None,
+                         "status": "no-backup", "detail": "no sibling backup dir with Manifest.plist"})
+            continue
+        for bd in targets:
+            try:
+                r = unlock_backup(rec, bd, out / f"unlocked-{len(rows)}",
+                                  pyiosbackup_module=pyiosbackup_module)
+            except Exception as exc:  # noqa: BLE001
+                r = {"ok": False, "error": f"exception: {exc}"}
+            rows.append({
+                "record": str(rec),
+                "backup": str(bd),
+                "status": "unlocked" if r.get("ok") else (r.get("error") or "failed"),
+                "classes": [c["class"] for c in r.get("escrow", {}).get("classes", [])
+                            if c.get("usable_now")],
+            })
+    manifest = {"records": len(found), "backups": len(backup_dirs), "attempts": rows}
+    (out / "escrow-sweep.json").write_text(
+        __import__("json").dumps(manifest, indent=2, default=str))
+    return {"out": str(out / "escrow-sweep.json"), **manifest}
+
+
+def render_sweep(res: dict[str, Any]) -> str:
+    lines = [f"escrow sweep: {res['records']} record(s), {res['backups']} backup(s)", ""]
+    unlocked = 0
+    for a in res["attempts"]:
+        ok = a["status"] == "unlocked"
+        if ok:
+            unlocked += 1
+        lines.append(f"  {'✓' if ok else '·'} {a['record']}")
+        lines.append(f"      backup: {a['backup'] or '—'}")
+        lines.append(f"      status: {a['status']}"
+                     + (f"  classes: {', '.join(a['classes'])}" if a.get("classes") else ""))
+    lines.append("")
+    lines.append(f"passcode-free unlocks: {unlocked}/{len(res['attempts'])}")
+    lines.append("report: " + res["out"])
+    return "\n".join(lines)
+
+
 def render_find(found: list[dict[str, Any]]) -> str:
     if not found:
         return "no escrow/backup keybags found under this path"

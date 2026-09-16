@@ -208,3 +208,58 @@ class Usbliter8PlanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SweepTest(unittest.TestCase):
+    def test_sweep_no_backup_reports(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            p = d / "records"
+            p.mkdir()
+            make_record(p / "rec.plist", with_password=False)
+            with tempfile.TemporaryDirectory() as od:
+                r = escrow.sweep(d, od)
+        self.assertEqual(r["records"], 1)
+        self.assertEqual(r["backups"], 0)
+        self.assertEqual(r["attempts"][0]["status"], "no-backup")
+
+    def test_sweep_attempts_unlock_against_sibling_backup(self):
+        class FailPy:
+            class BackupDecrypt:
+                def __init__(self, path): pass
+                def decrypt(self, out, password):
+                    raise RuntimeError("pw rejected")
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            p = d / "records"
+            p.mkdir()
+            make_record(p / "rec.plist", with_password=True)
+            b = d / "backups" / "UDID"
+            b.mkdir(parents=True)
+            (b / "Manifest.plist").write_text("{}")
+            with tempfile.TemporaryDirectory() as od:
+                r = escrow.sweep(d, od, pyiosbackup_module=FailPy)
+                self.assertEqual(r["records"], 1)
+                self.assertEqual(r["backups"], 1)
+                self.assertEqual(len(r["attempts"]), 1)
+                self.assertIn("pw rejected", r["attempts"][0]["status"])
+                sweep_json = Path(r["out"])
+                self.assertTrue(sweep_json.exists())
+
+    def test_render_sweep(self):
+        res = {"records": 1, "backups": 1,
+               "attempts": [{"record": "/r.plist", "backup": "/b",
+                             "status": "unlocked", "classes": ["NSFileProtectionNone"]}],
+               "out": "/tmp/x.json"}
+        out = escrow.render_sweep(res)
+        self.assertIn("passcode-free unlocks: 1/1", out)
+        self.assertIn("NSFileProtectionNone", out)
+
+
+class BfuGapStanceTest(unittest.TestCase):
+    def test_stance_has_gap_lines(self):
+        from opensleuth import forensics as F
+        out = F.render_stance()
+        self.assertIn("where CoreProbe needs work to beat them", out)
+        self.assertIn("ARTIFACT BREADTH", out)
+        self.assertIn("COURT-READY REPORTING", out)
+        self.assertIn("BFU PASSCODE BYPASS", out)

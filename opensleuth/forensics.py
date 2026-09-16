@@ -216,8 +216,33 @@ def render_stance() -> str:
         "  - For a modern locked device (A14+, iOS 26), the honest answer remains:",
         "    commercial tools have the licensed bypass; CoreProbe has the catalog",
         "    and the research instrument to find the next one.",
+        "",
+        *GAP_LINES,
     ]
     return "\n".join(lines)
+
+
+# What it would take to actually BEAT the commercial platforms, ranked by
+# effort vs payoff. Honest: some gaps are closed-vendor territory.
+GAP_LINES = [
+    "where CoreProbe needs work to beat them (ranked by payoff/effort):",
+    "  1. ARTIFACT BREADTH (winnable, ~months): adopt iLEAPP's 100+ artifact",
+    "     definitions as our parsing engine; the OSS catalog already exists.",
+    "     Payoff: parity with AXIOM on parsing, not on vendor validation.",
+    "  2. COURT-READY REPORTING (winnable, ~weeks): chain-of-custody manifest",
+    "     (native cxx hash), examiner signature, evidence integrity seals.",
+    "     Payoff: usable in court processes, the AXIOM moat.",
+    "  3. CLOUD ACQUISITION (partially winnable): Apple web APIs + lawful",
+    "     authorization flows; Cellebrite's edge is vendor relationships",
+    "     and prebuilt parsers for every service.",
+    "  4. BFU PASSCODE BYPASS (hard): A12+ SEP is closed; only sustainable",
+    "     paths are usbliter8-class research (A12/A13), escrow tooling, or",
+    "     vendor partnerships. GrayKey rents this, we must research it.",
+    "  5. DPA / Cellebrite central services (not open-source reachable):",
+    "     their device-partner program is proprietary; no OSS equivalent.",
+    "  6. ECOSYSTEM (structural): 40-person support, certified examiner",
+    "     training, integration with court LMS. Community growth over time.",
+]
 
 
 def detect() -> list[dict[str, Any]]:

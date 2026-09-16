@@ -101,6 +101,38 @@ class RamdiskFlowTest(unittest.TestCase):
             self.assertFalse(r["ok"])
             self.assertIn("timed out", r["error"])
 
+    def test_yield_card_checkm8_flow(self):
+        card = bfu.yield_card("A10", "12.4",
+                              device_flags={"attached": True, "dfu": True, "pwnd": True},
+                              tooling={"gaster": True, "sshpass": True})
+        by = {i["item"]: i for i in card["yield"]}
+        self.assertEqual(by["AES keyset (GID/UID)"]["state"], "obtainable")
+        self.assertEqual(by["system/user keybags (/var/Keychains)"]["state"], "obtainable")
+        self.assertEqual(by["Complete* class content"]["state"], "locked at BFU (SEP)")
+        self.assertTrue(card["checkm8_eligible"])
+
+    def test_yield_card_a13_sep_gated(self):
+        card = bfu.yield_card("A13", "26.6.1")
+        by = {i["item"]: i for i in card["yield"]}
+        self.assertIn("SEP-gated", by["AES keyset (GID/UID)"]["state"])
+        self.assertTrue(card["usbliter8_eligible"])
+
+    def test_render_yield_card(self):
+        card = bfu.yield_card("A10", "12.4")
+        out = bfu.render_yield_card(card)
+        self.assertIn("BFU yield card", out)
+        self.assertIn("checkm8 route available", out)
+
+    def test_bfu_runbook_has_honest_limits(self):
+        md = bfu.bfu_runbook("A13", "26.6.1", case_dir="case")
+        self.assertIn("# BFU acquisition runbook", md)
+        self.assertIn("Honest limits", md)
+        self.assertIn("SEP", md)
+
+    def test_bfu_runbook_checkm8_chain(self):
+        md = bfu.bfu_runbook("A10", "12.4", case_dir="case")
+        self.assertIn("--watch --keys --ramdisk", md)
+
     def test_subprocess_file_not_found(self):
         with mock.patch("opensleuth.bfu.subprocess.run",
                         side_effect=FileNotFoundError("gaster")):

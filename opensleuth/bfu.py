@@ -149,6 +149,145 @@ def usbliter8_plan(chip: str = "A13") -> dict[str, Any]:
     }
 
 
+def yield_card(chip: str = "?", ios: str = "?",
+               device_flags: dict[str, Any] | None = None,
+               tooling: dict[str, bool] | None = None) -> dict[str, Any]:
+    """What THIS device can actually yield at BFU right now.
+
+    device_flags: e.g. {'dfu': bool, 'recovery': bool, 'pwnd': bool,
+                        'attached': bool}
+    tooling:      e.g. {'gaster': bool, 'palera1n': bool,
+                        'usbliter8ctl': bool, 'sshpass': bool}
+    """
+    from .matrix import CHIP_RANK, USBLITER8_CHIPS
+    chip = (chip or "?").upper()
+    flags = device_flags or {}
+    tools = tooling or {}
+    rank = CHIP_RANK.get(chip)
+    checkm8 = rank is not None and rank <= 11
+    usbliter8 = chip in USBLITER8_CHIPS
+    pwnd = bool(flags.get("pwnd"))
+    in_dfu = bool(flags.get("dfu")) or bool(flags.get("recovery"))
+    attached = bool(flags.get("attached"))
+
+    items: list[dict[str, Any]] = [
+        {"item": "USB identity (serial/UDID/ECID)", "state": "obtainable" if attached else "no device",
+         "action": "attach device" if not attached else "usb_state captured"},
+        {"item": "iBoot env (serial/ecid/boardid/sxpt)", "state": "obtainable" if (in_dfu and pwnd) else
+         ("pwnd DFU pending" if in_dfu else "enter DFU + pwn"),
+         "action": "irecovery -c getenv" if (in_dfu and pwnd) else None},
+        {"item": "AES keyset (GID/UID)", "state": "obtainable" if (checkm8 and pwnd and tools.get("gaster")) else
+         ("needs gaster + pwn" if checkm8 else "SEP-gated on this chip"),
+         "action": "gaster keys" if (checkm8 and pwnd) else None},
+        {"item": "system/user keybags (/var/Keychains)", "state": "obtainable" if (pwnd and (tools.get("sshpass") or tools.get("ssh"))) else
+         ("needs ramdisk + ssh" if (checkm8 or usbliter8) and pwnd else
+          ("needs pwn" if checkm8 or usbliter8 else "not without first unlock")),
+         "action": "ramdisk extract flow" if pwnd else None},
+        {"item": "Complete* class content", "state": "locked at BFU (SEP)",
+         "action": "first unlock (AFU) or escrow/backup path"},
+        {"item": "escrow/backup unlock (paired computers)", "state": "case-dependent",
+         "action": "opensleuth escrow find <case-dir>"},
+    ]
+    return {
+        "chip": chip,
+        "ios": ios,
+        "attached": attached,
+        "in_dfu_recovery": in_dfu,
+        "pwnd": pwnd,
+        "checkm8_eligible": checkm8,
+        "usbliter8_eligible": usbliter8,
+        "yield": items,
+    }
+
+
+def render_yield_card(card: dict[str, Any]) -> str:
+    lines = [
+        f"BFU yield card: {card['chip']} / {card['ios'] or '?'}",
+        f"  device attached: {'yes' if card['attached'] else 'NO'}   "
+        f"recovery/DFU: {'yes' if card['in_dfu_recovery'] else 'no'}   "
+        f"pwnd: {'yes' if card['pwnd'] else 'no'}",
+        "",
+        f"{'item':<46}{'state':<28}action",
+        "-" * 110,
+    ]
+    for it in card["yield"]:
+        lines.append(f"{it['item']:<46}{it['state']:<28}{it['action'] or '—'}")
+    lines.append("")
+    if card["checkm8_eligible"]:
+        lines.append("checkm8 route available: pwn -> keys -> keybags -> metadata")
+    elif card["usbliter8_eligible"]:
+        lines.append("usbliter8 route: RP2350 pwn -> iBoot control -> ramdisk (SEP still gates)")
+    else:
+        lines.append("no public bootrom route for this chip; escrow is the passcode-free path")
+    return "\n".join(lines)
+
+
+def bfu_runbook(chip: str = "?", ios: str = "?", case_dir: str = "case") -> str:
+    """Markdown runbook for the case file."""
+    card = yield_card(chip, ios)
+    from .keybag import CLASS_NAMES  # noqa: F401  (documentation reference)
+    md = [
+        f"# BFU acquisition runbook - {chip or '?'} / {ios or '?'}",
+        "",
+        "## 1. State check",
+        "```bash",
+        "opensleuth acquire probe",
+        "opensleuth doctor",
+        "```",
+        "",
+        "## 2. Identity (always obtainable)",
+        "```bash",
+        "opensleuth acquire info --out case/info.json",
+        "```",
+        "",
+        "## 3. Expectations",
+        "```bash",
+        f"opensleuth acquire bfu --chip {chip or '?'} --ios {ios or '?'} --out {case_dir}",
+        "```",
+        "",
+        "## 4. Pwn + extraction",
+    ]
+    if card["checkm8_eligible"]:
+        md += [
+            "```bash",
+            "# put device in DFU, then:",
+            f"opensleuth acquire bfu --chip {chip or '?'} --watch --keys --ramdisk ./payloads --out {case_dir}",
+            "opensleuth keybag status case/systembag.kb   # per-class usable-now",
+            "```",
+        ]
+    elif card["usbliter8_eligible"]:
+        md += [
+            "```bash",
+            "opensleuth acquire bfu --chip A13 --route usbliter8 --out case",
+            "# RP2350 rig: DFU -> PWND:[usbliter8] -> ramdisk (usbliter8ra1n)",
+            "opensleuth keybag status case/systembag.kb",
+            "```",
+        ]
+    else:
+        md += [
+            "> no public bootrom route for this chip. Escrow/backup path:",
+            "```bash",
+            "opensleuth escrow find <case-materials>",
+            "opensleuth escrow describe <record>",
+            "opensleuth escrow unlock <record> <backup> --out case/decrypted",
+            "```",
+        ]
+    md += [
+        "",
+        "## 5. Escrow sweep (paired computers)",
+        "```bash",
+        f"opensleuth escrow sweep <materials-dir> --out {case_dir}",
+        "```",
+        "",
+        "## 6. Honest limits",
+        f"- {card['yield'][4]['state']}: {card['yield'][4]['action']}",
+        "- No open route bypasses SEP passcode enforcement at BFU.",
+        "- Document everything; keep hashes (opensleuth cxx hash).",
+        "",
+    ]
+    return "\n".join(md)
+
+
 def render_usbliter8_plan(chip: str = "A13") -> str:
     p = usbliter8_plan(chip)
     lines = [
