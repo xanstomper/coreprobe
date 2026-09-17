@@ -45,9 +45,126 @@ MACHO_MAGICS = {b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
                 b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe"}
 
 
+def _read_asn1_tlv(data: bytes, off: int) -> tuple[int, bytes, int]:
+    tag = data[off]
+    loff = off + 1
+    ln = data[loff]
+    if ln & 0x80:
+        n = ln & 0x7F
+        ln = int.from_bytes(data[loff + 1:loff + 1 + n], "big")
+        hdr = 2 + n
+    else:
+        hdr = 2
+    return tag, data[off + hdr:off + hdr + ln], off + hdr + ln
+
+
+def parse_asn1_im4p(data: bytes, source: str = "<data>") -> dict[str, Any] | None:
+    """Parse the DER/BER im4p layout used by real Apple images.
+
+    SEQUENCE { IA5String "IM4P", IA5String type, IA5String desc,
+                OCTET STRING payload, [OCTET STRING kbag ...] }
+    Returns None if the data is not this layout.
+    """
+    try:
+        tag, seq, _ = _read_asn1_tlv(data, 0)
+        if tag != 0x30:
+            return None
+        # children: IA5String "IM4P", IA5String type, IA5String desc, OCTET payload...
+        off = 0
+        fields = []
+        while off < len(seq) and len(fields) < 8:
+            t, v, off = _read_asn1_tlv(seq, off)
+            fields.append((t, v))
+        if len(fields) < 4:
+            return None
+        (t0, magic), (t1, ptype), (t2, desc), (t3, payload) = fields[:4]
+        if magic != b"IM4P":
+            return None
+        kbags = [v for t, v in fields[4:] if t == 0x04]
+        # kbag structure: SEQ { INT version, OCTET STRING salt, OCTET STRING iv }
+        kbag_info = []
+        for kb in kbags:
+            try:
+                _, ks, o2 = _read_asn1_tlv(kb, 0)
+                if ks[:2] != b"\x07\x02":
+                    # embedded seq
+                    _, ks2, o2 = _read_asn1_tlv(ks, 0) if ks[0] in (0x30,) else (0, ks, 0)
+                    ks = ks2
+                # walk: INT(1B) OCTET(16 salt) OCTET(16 iv) OCTET(32 key)?
+                info = {"len": len(kb)}
+                so = 0
+                parts = []
+                while so < len(ks):
+                    tt, vv, so = _read_asn1_tlv(ks, so)
+                    parts.append((tt, vv))
+                info["parts"] = [(f"0x{tt:02x}", len(vv)) for tt, vv in parts]
+                kbag_info.append(info)
+            except Exception:  # noqa: BLE001
+                kbag_info.append({"len": len(kb)})
+        import hashlib as _h
+        import re as _re
+        # desc is hex-encoded ASCII text for sep images; decode for facts
+        try:
+            desc_bytes = bytes.fromhex(desc.decode("latin-1"))
+        except (ValueError, UnicodeDecodeError):
+            desc_bytes = desc
+        facts = {"manifest_sha256": _h.sha256(desc_bytes).hexdigest()}
+        # version integers travel as 02 02 XX XX / 02 04 XX XX XX XX ints
+        # inside the desc; extract the small ones as build fingerprints
+        ints = [int.from_bytes(m, "big") for m in
+                _re.findall(rb"\x02\x04(\x00\x00?.{2})", desc_bytes, _re.S)]
+        if not ints:
+            ints = [int.from_bytes(m, "big") for m in
+                    _re.findall(rb"\x02\x02(.{2})", desc_bytes, _re.S)]
+        facts["manifest_ints"] = ints[:6]
+        for marker in (b"impl", b"tbms", b"tz0s", b"tsss", b"arm"):
+            facts[marker.decode()] = marker in desc_bytes
+        return {
+            "layout": "asn1",
+            "type": ptype.decode("latin-1", "replace"),
+            "description": desc.decode("latin-1", "replace")[:80],
+            "manifest_facts": facts,
+            "payload": payload,
+            "payload_len": len(payload),
+            "payload_sha256": _h.sha256(payload).hexdigest(),
+            "encrypted": bool(kbags),
+            "kbag_count": len(kbags),
+            "kbags": kbag_info[:4],
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def extract_sep_image(im4p_path: str | Path) -> dict[str, Any]:
     """Parse a sep-firmware.im4p and return its TLV inventory + raw SEPOS image."""
     data = Path(im4p_path).read_bytes()
+    asn1 = parse_asn1_im4p(data, source=str(im4p_path))
+    if asn1 is not None:
+        image = asn1["payload"]
+        out = {
+            "file": str(im4p_path),
+            "im4p": {k: v for k, v in asn1.items() if k != "payload"},
+            "tlv": parse_tlv(image) if not asn1["encrypted"] else None,
+            "sepos_macho": None,
+            "payload_sha256": asn1.get("payload_sha256"),
+        }
+        if not asn1["encrypted"]:
+            out["sepos_macho"] = analyze_macho(image)
+            if not out["sepos_macho"] and out["tlv"]:
+                for e_start in _macho_offsets(image):
+                    m = analyze_macho(image[e_start:])
+                    if m:
+                        out["sepos_macho"] = m
+                        break
+        else:
+            # entropy check: high entropy = confirmed encrypted/encoded
+            import math
+            from collections import Counter as _C
+            counts = _C(image[::64])
+            ent = -sum((c / len(image[::64])) * math.log2(c / len(image[::64]))
+                       for c in counts.values())
+            out["payload_entropy"] = round(ent, 2)
+        return out
     info = parse_im4p(data, source=str(im4p_path))
     image = _image_of(data)
     out = {
@@ -199,10 +316,24 @@ def diff_builds(older: dict[str, Any], newer: dict[str, Any]) -> list[str]:
 
 
 def render(inv: dict[str, Any]) -> str:
+    im4p = inv.get("im4p", {})
     lines = [f"SEP firmware: {inv['file']}",
-             f"  im4p type : {inv['im4p'].get('type')}",
-             f"  desc      : {inv['im4p'].get('description')}",
-             f"  image     : {inv['im4p'].get('image_len', 0):,} B"]
+             f"  im4p type : {im4p.get('type')}",
+             f"  desc      : {im4p.get('description')}",
+             f"  layout    : {im4p.get('layout', 'binary')}",
+             f"  image     : {im4p.get('payload_len') or im4p.get('image_len', 0):,} B"]
+    facts = im4p.get("manifest_facts") or {}
+    if facts.get("manifest_sha256"):
+        lines.append(f"  payload sha256 : {inv.get('payload_sha256', facts['manifest_sha256'])[:32]}...")
+        lines.append(f"  manifest ints  : {facts.get('manifest_ints')}")
+        present = [k for k in ("impl", "tbms", "tz0s", "tsss", "arm") if facts.get(k)]
+        lines.append(f"  manifest tags  : {', '.join(present)}")
+    if im4p.get("encrypted"):
+        lines.append(f"  ENCRYPTED : {im4p.get('kbag_count')} kbag(s) present "
+                     f"(UID/GID-wrapped) - payload entropy {inv.get('payload_entropy', '?')} bits/byte")
+        lines.append("              decrypt requires the GID key (gaster keys on pwned "
+                     "DFU, or a publicly dumped image)")
+        return "\n".join(lines)
     m = inv.get("sepos_macho")
     if m:
         lines += [f"  macho     : {m['arch']} ({m['size']:,} B, ncmds={m.get('ncmds')})"]

@@ -1663,6 +1663,13 @@ def cmd_sepos_info(args):
         print(sepos.render(sepos.extract_sep_image(args.file)))
     except (ValueError, OSError) as exc:
         print(f"sepos: {exc}")
+        import sys
+        # diagnostic aid: show raw head for format investigation
+        try:
+            head = open(args.file, "rb").read(32)
+            print(f"  head bytes: {head.hex()}")
+        except OSError:
+            pass
 
 
 def cmd_sepos_diff(args):

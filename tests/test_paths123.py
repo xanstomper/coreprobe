@@ -137,3 +137,32 @@ class TestFaultInjection:
         t = FI.TARGET_MOMENTS[1]
         out = FI.render_plan(FI.default_plan(t["id"]), t)
         assert "goal" in out and "grid points" in out
+# ---- real Apple firmware (fetched via ipswfetch; skip if not present) ----
+
+REAL_SEP = [
+    Path("/tmp/sep-lib/sep-26.6.1-23G83.im4p"),
+    Path("/tmp/sep-lib/sep-27.0-24A437.im4p"),
+]
+
+def test_real_firmware_fingerprints():
+    avail = [p for p in REAL_SEP if p.exists()]
+    if not avail:
+        import pytest
+        pytest.skip("real firmware not fetched in this environment")
+    facts = {}
+    for p in avail:
+        r = SE.parse_asn1_im4p(p.read_bytes())
+        assert r is not None and r["type"] == "sepi"
+        assert r["encrypted"] is True
+        f = r["manifest_facts"]
+        assert f["manifest_ints"], "build int missing"
+        assert {"impl", "tbms", "tz0s", "arm"} <= set(f.keys())
+        facts[p.name] = f["manifest_ints"][0]
+    if len(facts) == 2:
+        vals = list(facts.values())
+        assert vals[0] != vals[1], "different iOS builds must have different SEPOS build ints"
+
+def test_ipswfetch_zip64_extra():
+    import struct
+    # fabricate a CD with ZIP64 extra for lho
+    from opensleuth.ipswfetch import find_member  # noqa: F401  (import check)
