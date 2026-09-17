@@ -1540,11 +1540,24 @@ def cmd_campaign_status(args):
 
 def cmd_campaign_run(args):
     from . import campaign
+    from . import dfu_live
     from .dfutrace import analyze, parse_usbmon_text, render
     state = campaign.load()
     if args.campaign_id not in state["campaigns"]:
         sys.exit(f"campaign not found: {args.campaign_id}")
     capture = Path(args.capture).read_text(errors="replace")
+    if args.check:
+        # non-mutating: confirm a DFU-mode device is present and speaks DFU
+        try:
+            t = dfu_live.DfuTransport()
+        except RuntimeError as exc:
+            sys.exit(f"check: {exc}")
+        v = t.verify()
+        print(dfu_live.render_verify(v))
+        session = campaign.start_session(state, args.campaign_id, kind="live-check")
+        campaign.finish_session(state, session["id"], {"iterations": 0})
+        campaign.save(state)
+        return
     if args.dry:
         events = parse_usbmon_text(capture)
         rep = analyze(events)
@@ -1558,29 +1571,31 @@ def cmd_campaign_run(args):
         print()
         print("dry session recorded:", campaign.render_session(session))
         return
-    # live fuzz needs a real DFU device via pyusb
+    # live fuzz - explicit opt-in required (brick-safety gate)
+    if not args.live:
+        sys.exit("no mode selected: use --dry (analysis), --check (device "
+                 "verify), or --live --confirm-live-dfu (fuzz a DFU-mode "
+                 "research device)")
+    if not args.confirm_live_dfu:
+        sys.exit("--confirm-live-dfu required: this drives control "
+                 "transfers at a device in DFU mode. Only run against YOUR "
+                 "research device; enter DFU (vol-up, vol-down, hold power "
+                 "10s, then power+vol-down 5s) first.")
     try:
-        import usb.core  # noqa: F401
-    except ImportError:
-        sys.exit("live fuzz needs pyusb; use --dry for analysis-only")
-    class LiveDev:
-        def __init__(self):
-            import usb.core
-            self.dev = usb.core.find(idVendor=0x05AC)
-            if self.dev is None:
-                raise SystemExit("no Apple device in DFU/recovery (vid 0x05ac)")
-        def alive(self):
-            import usb.core
-            return usb.core.find(idVendor=0x05AC) is not None
-        def ctrl_transfer(self, *a, **k):
-            return self.dev.ctrl_transfer(*a, **k)
+        t = dfu_live.DfuTransport()
+    except RuntimeError as exc:
+        sys.exit(f"live: {exc}")
+    print(dfu_live.render_verify(t.verify()))
     r = campaign.record_fuzz_run(state, args.campaign_id, capture,
-                                 LiveDev(), iterations=args.iterations)
+                                 t, iterations=args.iterations,
+                                 seed=args.seed)
     campaign.save(state)
     print(campaign.render_session(r["session"]))
     if r.get("fuzz"):
         print(f"  crashes={r['fuzz']['crashes']} hangups={r['fuzz']['hangups']} "
               f"interesting={len(r['fuzz']['interesting'])}")
+    print("if the device stopped responding: re-enter DFU with the button "
+          "sequence and continue the session.")
 
 
 def cmd_campaign_triage(args):
@@ -2062,11 +2077,16 @@ def main(argv=None):
     cgn.set_defaults(fn=cmd_campaign_new)
     cgs = cg_sub.add_parser("status", help="campaign status: sessions + leads + verdicts")
     cgs.set_defaults(fn=cmd_campaign_status)
-    cgr = cg_sub.add_parser("run", help="run a fuzz session from a usbmon capture (live device or dry analysis)")
+    cgr = cg_sub.add_parser("run", help="run a fuzz session (dry analysis | --check device verify | --live DFU fuzz)")
     cgr.add_argument("campaign_id")
     cgr.add_argument("--capture", required=True, help="usbmon text capture file")
     cgr.add_argument("--iterations", type=int, default=200)
+    cgr.add_argument("--seed", type=int, default=1337)
     cgr.add_argument("--dry", action="store_true", help="analyze + corpus only (no device driving)")
+    cgr.add_argument("--check", action="store_true", help="non-mutating: verify a DFU-mode device is present and speaks DFU")
+    cgr.add_argument("--live", action="store_true", help="fuzz a real DFU-mode device over PC USB (picoless)")
+    cgr.add_argument("--confirm-live-dfu", action="store_true",
+                     help="REQUIRED with --live: your research device is in DFU mode and you accept hang/re-entry risk")
     cgr.set_defaults(fn=cmd_campaign_run)
     cgt = cg_sub.add_parser("triage", help="set a lead verdict (observed|promising|dead-end|escalated|finding)")
     cgt.add_argument("lead_id")

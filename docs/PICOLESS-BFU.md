@@ -25,7 +25,36 @@ Everything else can run right now with zero hardware.
 | A12+ SEPOS decryption | Same key. No A12+ GID is public anywhere (see `sepos gidkeys`). |
 | A14+ pwn | No public exploit exists at all. |
 
-## The one picoless avenue that exists (already built)
+## The picoless A12+ research avenue (built, live)
+
+Escrow is the practical unlock, but it is not an exploit hunt. The one
+genuine picoless route to NEW A12/A13 capability is hunting a
+**host-reachable DFU bug** - a length/state-confusion flaw in the DFU
+protocol layer (the checkm8 bug class) that a normal PC USB stack CAN
+deliver, unlike usbliter8's device-side DWC2 race.
+
+Built and wired:
+
+1. `campaign new <name> --chip A13` — start a research campaign
+2. `campaign run <id> --capture <usbmon.txt> --check` — non-mutating:
+   verifies a device in DFU mode (pid 0x1227) is present and speaks DFU.
+   Safe to run any time; refuses non-DFU Apple devices outright.
+3. `campaign run <id> --capture <usbmon.txt> --live --confirm-live-dfu`
+   — drives DFU-class control-transfer mutations at the DFU-mode device
+   over plain PC USB (picoless). Safety model:
+   - refuses anything except DFU mode (pid 0x1227) - a live iPhone in
+     normal mode is never touched (brick protection)
+   - only DFU-class requests (0x21/0xA1) travel; data stages only on
+     DNLOAD, zero-filled, capped at 4 KiB
+   - device death/hang is the observed signal; worst case is a hang,
+     re-enter DFU with the button sequence. Nothing is written to NAND
+     from DFU without a signed image, so this cannot brick.
+
+The capture corpus comes from `dfu-usbmon.sh` (in the lab kit). Start
+with `campaign run <id> --capture <file> --dry` to build/analyze the
+corpus offline first, then go live.
+
+## The picoless avenue that existed before (escrow)
 
 **Escrow/backup-keybag** is the legitimate passcode-free path that needs
 no hardware and works on every model — including A13/26.6.1. It fires
