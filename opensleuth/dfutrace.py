@@ -120,6 +120,31 @@ def read_corpus(path: str | Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(fh))
 
 
+def default_corpus() -> list[dict[str, Any]]:
+    """Standard DFU request corpus - bootstrap for live fuzz without a
+    capture. Covers every DFU 1.1 request in both directions with the
+    canonical host sequences seen on modern devices (A10-era onward):
+    DETACH, DNLOAD (block 0 + typical sizes), UPLOAD variants,
+    GETSTATUS (6B), CLRSTATUS, GETSTATE (1B), ABORT."""
+    rows: list[dict[str, Any]] = []
+    for bm, req, wl in [
+        (0x21, 0x00, 0x0000),  # DETACH
+        (0x21, 0x01, 0x0000),  # DNLOAD len 0 (state probe)
+        (0x21, 0x01, 0x0800),  # DNLOAD 2 KiB (typical first image chunk)
+        (0x21, 0x01, 0x1000),  # DNLOAD 4 KiB
+        (0xA1, 0x02, 0x0800),  # UPLOAD 2 KiB
+        (0xA1, 0x02, 0x1000),  # UPLOAD 4 KiB
+        (0xA1, 0x03, 0x0006),  # GETSTATUS
+        (0x21, 0x04, 0x0000),  # CLRSTATUS
+        (0xA1, 0x05, 0x0001),  # GETSTATE
+        (0x21, 0x06, 0x0000),  # ABORT
+    ]:
+        rows.append({"bmRequestType": bm, "bRequest": req, "wValue": 0,
+                     "wIndex": 0, "wLength": wl,
+                     "req": REQ_NAMES.get(req, f"0x{req:02x}")})
+    return rows
+
+
 def render(report: dict[str, Any]) -> str:
     lines = [
         f"DFU trace analysis: {report['events']} usbmon events, "

@@ -121,25 +121,28 @@ def triage_lead(state: dict[str, Any], lead_id: str, verdict: str,
 def record_fuzz_run(state: dict[str, Any], campaign_id: str,
                     capture_text: str, transport: Any,
                     iterations: int = 200, seed: int = 1337,
+                    corpus: list[dict[str, Any]] | None = None,
                     log=print) -> dict[str, Any]:
     """One full research session: parse capture -> analyze -> corpus -> fuzz.
 
     transport: live device (pyusb) or a simulator in tests. Crashes and
     anomalies become leads automatically (verdict=observed).
+    corpus: optional prebuilt rows (e.g. default_corpus()); bypasses the
+    usbmon parse when provided.
     """
     events = parse_usbmon_text(capture_text)
     rep = analyze(events)
-    corpus = build_corpus(events)
-    if not corpus:
+    used = build_corpus(events) if corpus is None else corpus
+    if not used:
         finish = {"iterations": 0}
         session = start_session(state, campaign_id, kind="dfu-fuzz-empty")
         finish_session(state, session["id"], finish)
         return {"session": session, "analysis": rep, "fuzz": None,
                 "note": "no DFU requests in capture; nothing to fuzz"}
     session = start_session(state, campaign_id)
-    fz = run_fuzz(transport, corpus, iterations=iterations, seed=seed, log=log)
+    fz = run_fuzz(transport, used, iterations=iterations, seed=seed, log=log)
     finish_session(state, session["id"], {
-        "iterations": iterations, "corpus_size": len(corpus), **fz})
+        "iterations": iterations, "corpus_size": len(used), **fz})
     # anomalies from the trace
     for anomaly in rep.get("anomalies", [])[:10]:
         add_lead(state, session["id"], "trace-anomaly", anomaly,

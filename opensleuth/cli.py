@@ -1545,7 +1545,20 @@ def cmd_campaign_run(args):
     state = campaign.load()
     if args.campaign_id not in state["campaigns"]:
         sys.exit(f"campaign not found: {args.campaign_id}")
-    capture = Path(args.capture).read_text(errors="replace")
+    if args.capture == "default":
+        capture_text = "".join(f"s 21 01 0000 0000 {wl:04x} 0000\n" for wl in (0, 0x800, 0x1000))
+        using_default = True
+    else:
+        capture_text = Path(args.capture).read_text(errors="replace")
+        using_default = False
+    if using_default and not args.live and not args.check:
+        from .dfutrace import default_corpus, write_corpus
+        rows = default_corpus()
+        print(f"default corpus: {len(rows)} standard DFU requests "
+              f"(no capture needed)")
+        print("use --check to verify a DFU device, or --live "
+              "--confirm-live-dfu to fuzz")
+        return
     if args.check:
         # non-mutating: confirm a DFU-mode device is present and speaks DFU
         try:
@@ -1559,7 +1572,7 @@ def cmd_campaign_run(args):
         campaign.save(state)
         return
     if args.dry:
-        events = parse_usbmon_text(capture)
+        events = parse_usbmon_text(capture_text)
         rep = analyze(events)
         print(render(rep))
         session = campaign.start_session(state, args.campaign_id, kind="dry-analysis")
@@ -1586,9 +1599,15 @@ def cmd_campaign_run(args):
     except RuntimeError as exc:
         sys.exit(f"live: {exc}")
     print(dfu_live.render_verify(t.verify()))
-    r = campaign.record_fuzz_run(state, args.campaign_id, capture,
+    if using_default:
+        from .dfutrace import default_corpus
+        rows: list[dict[str, Any]] = default_corpus()
+        print(f"using default corpus: {len(rows)} standard DFU requests")
+    else:
+        rows = None
+    r = campaign.record_fuzz_run(state, args.campaign_id, capture_text,
                                  t, iterations=args.iterations,
-                                 seed=args.seed)
+                                 seed=args.seed, corpus=rows)
     campaign.save(state)
     print(campaign.render_session(r["session"]))
     if r.get("fuzz"):
@@ -2079,7 +2098,7 @@ def main(argv=None):
     cgs.set_defaults(fn=cmd_campaign_status)
     cgr = cg_sub.add_parser("run", help="run a fuzz session (dry analysis | --check device verify | --live DFU fuzz)")
     cgr.add_argument("campaign_id")
-    cgr.add_argument("--capture", required=True, help="usbmon text capture file")
+    cgr.add_argument("--capture", default="default", help="usbmon text capture file, or 'default' for the standard DFU corpus (no capture needed)")
     cgr.add_argument("--iterations", type=int, default=200)
     cgr.add_argument("--seed", type=int, default=1337)
     cgr.add_argument("--dry", action="store_true", help="analyze + corpus only (no device driving)")

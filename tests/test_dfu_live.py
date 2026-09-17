@@ -162,3 +162,33 @@ def test_get_status_tolerates_errors():
     t = L.DfuTransport(BrokenDev(), log=lambda s: None)
     st = t.get_status()
     assert "status_error" in st or "state_error" in st
+
+
+def test_default_corpus_covers_all_requests():
+    from opensleuth import dfutrace as T
+    rows = T.default_corpus()
+    reqs = {r["bRequest"] for r in rows}
+    assert reqs == {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+    dns = [r for r in rows if r["bRequest"] == 0x01]
+    assert {r["wLength"] for r in dns} >= {0, 0x800, 0x1000}
+    status = [r for r in rows if r["bRequest"] == 0x03]
+    assert status[0]["wLength"] == 6
+
+
+def test_record_fuzz_run_accepts_prebuilt_corpus(tmp_path):
+    from opensleuth import campaign as C
+    from opensleuth import dfutrace as T
+    state = C.load(tmp_path / "c.json")
+    cid = C.new_campaign(state, "bootstrap", "DFU", chip="A13")["id"]
+
+    class Dev:
+        def alive(self):
+            return True
+
+        def ctrl_transfer(self, *a, **k):
+            return b"\x00"
+
+    r = C.record_fuzz_run(state, cid, "", Dev(), iterations=30,
+                          corpus=T.default_corpus(), log=lambda s: None)
+    assert r["fuzz"]["sent"] == 30
+    assert r["fuzz"]["crashes"] == 0
