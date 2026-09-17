@@ -166,3 +166,68 @@ def test_ipswfetch_zip64_extra():
     import struct
     # fabricate a CD with ZIP64 extra for lho
     from opensleuth.ipswfetch import find_member  # noqa: F401  (import check)
+
+
+class TestGidKeys:
+    def test_status_honest(self):
+        from opensleuth import gidkeys as G
+        rows = G.status("A13")
+        assert rows and rows[0]["status"] == "device"
+        assert G.status("A7")[0]["status"] == "public"
+        assert G.status("A18+")[0]["status"] == "none"
+        assert not G.status("NOPE")
+
+    def test_register_and_render(self, tmp_path, monkeypatch):
+        from opensleuth import gidkeys as G
+        kf = tmp_path / "gid.bin"
+        kf.write_bytes(b"\x01" * 32)
+        monkeypatch.setattr(G, "KEY_STORE", tmp_path / "keys.json")
+        r = G.register_key("A13", kf)
+        assert r["registered"] == "A13"
+        out = G.render(G.status(), {"A13": r["record"]})
+        assert "no A12+ GID key is public anywhere" in out
+
+    def test_sepos_decrypt_pipeline(self, tmp_path):
+        # fixture roundtrip through decrypt + analyze
+        import struct
+        from Crypto.Cipher import AES
+        from opensleuth import sepos as S
+
+        def tlv(tag, val):
+            ln = len(val)
+            if ln < 128:
+                return bytes([tag, ln]) + val
+            return bytes([tag, 0x84]) + ln.to_bytes(4, "big") + val
+
+        macho = b"\xfe\xed\xfa\xcf" + struct.pack(">II", 0x0100000C, 0) + b"\x00" * 4
+        macho += struct.pack("<I", 2)
+        macho += b"\x90" * (32 - len(macho))
+        seg = struct.pack("<II", 0x19, 72) + b"__SEPOS\x00\x00\x00" + b"\x00" * 8
+        seg += struct.pack("<QQ", 0x100000, 0x80000) + b"\x00" * 24
+        body = (macho + seg + b"kbag_counter_error_" * 400)
+        body += b"\x00" * (-len(body) % 16)  # CBC block alignment
+        key = bytes(range(32))
+        enc = AES.new(key, AES.MODE_CBC, b"\x00" * 16).encrypt(body)
+        im4p = tlv(0x30, tlv(0x16, b"IM4P") + tlv(0x16, b"sepi") + tlv(0x16, b"ff" * 4)
+                  + tlv(0x04, enc) + tlv(0x04, b"\x30\x72"))
+        f = tmp_path / "sep.im4p"
+        f.write_bytes(im4p)
+        kf = tmp_path / "key.bin"
+        kf.write_bytes(key)
+        r = S.decrypt_payload(f, kf, out=str(tmp_path / "sep.sepos"))
+        assert r["ok"]
+        assert (tmp_path / "sep.sepos").exists()
+        a = S.analyze_binary(tmp_path / "sep.sepos")
+        assert a["macho"]["arch"] == "arm64"
+
+    def test_sepos_diff_binaries(self, tmp_path):
+        from opensleuth import sepos as S
+        a = bytes(range(256)) * 64
+        b = bytearray(a)
+        b[4096:4120] = b"\x99" * 20
+        fa, fb = tmp_path / "a.bin", tmp_path / "b.bin"
+        fa.write_bytes(a)
+        fb.write_bytes(bytes(b))
+        d = S.diff_binaries(fa, fb)
+        assert d["region_count"] >= 1
+        assert any(r["offset"] == 4096 for r in d["changed_regions"])

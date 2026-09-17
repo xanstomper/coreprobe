@@ -352,3 +352,180 @@ def render_diff(changes: list[str]) -> str:
     if not changes:
         return "no structural SEP differences found"
     return "\n".join("  " + c for c in changes)
+
+
+# ---------------------------------------------------------------------------
+# Decrypt + binary analysis: turns a pwned-device GID key into real SEPOS
+# code analysis in one command. The pipeline is fully built; it starts
+# producing attack-surface knowledge the moment key material exists.
+# ---------------------------------------------------------------------------
+
+def decrypt_payload(im4p_path: str | Path, gid_key: str | Path | bytes,
+                    out: str | Path | None = None) -> dict[str, Any]:
+    """Decrypt the SEPOS payload with the device GID key (from gaster keys).
+
+    Encrypted sep payloads are AES-256-CBC with a zero IV, keyed by the
+    GID key (per Apple's documented image encryption: 0x837-style keys
+    applied via the crypto engine). gaster `keys` output on a pwned
+    device supplies the GID-derived key material.
+    """
+    from Crypto.Cipher import AES
+    data = Path(im4p_path).read_bytes()
+    asn1 = parse_asn1_im4p(data, source=str(im4p_path))
+    if asn1 is None:
+        raise ValueError(f"{im4p_path}: not an asn1 im4p")
+    if not asn1.get("encrypted"):
+        raise ValueError("payload is not encrypted (nothing to decrypt)")
+    if not isinstance(gid_key, bytes):
+        kp = Path(gid_key)
+        if kp.exists():
+            key = kp.read_bytes()
+        else:
+            try:
+                key = bytes.fromhex(str(gid_key).replace(" ", ""))
+            except ValueError:
+                raise ValueError("gid key must be a file path or hex")
+    else:
+        key = gid_key
+    # try the two plausible key sizes/lengths
+    payload = asn1["payload"]
+    for keylen in (32, 16):
+        if len(key) < keylen:
+            continue
+        k = key[:keylen]
+        try:
+            plain = AES.new(k, AES.MODE_CBC, b"\x00" * 16).decrypt(payload)
+        except Exception:  # noqa: BLE001
+            continue
+        if _looks_like_sepos(plain):
+            dest = Path(out) if out else Path(im4p_path).with_suffix(".sepos")
+            dest.write_bytes(plain)
+            return {"ok": True, "decrypted": str(dest), "size": len(plain),
+                    "macho": analyze_macho(plain),
+                    "tlv": parse_tlv(plain)}
+    return {"ok": False,
+            "error": "decryption produced no valid SEPOS structure (wrong key or key length)"}
+
+
+def _looks_like_sepos(plain: bytes) -> bool:
+    if plain[:5] == b"SEPOS":
+        return True
+    if plain[:4] in (b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+                     b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe"):
+        return True
+    # TLV: content entropy drop below 6 bits/sample is a strong signal
+    if len(plain) < 4096:
+        return False
+    from collections import Counter
+    import math
+    sample = plain[::512]
+    c = Counter(sample)
+    ent = -sum((n / len(sample)) * math.log2(n / len(sample)) for n in c.values())
+    return ent < 6.0
+
+
+def analyze_binary(sepos_bin: str | Path) -> dict[str, Any]:
+    """Struct analysis of a DECRYPTED SEPOS image (Mach-O + segments)."""
+    import struct
+    data = Path(sepos_bin).read_bytes()
+    out: dict[str, Any] = {"file": str(sepos_bin), "size": len(data)}
+    m = analyze_macho(data)
+    if not m:
+        out["error"] = "not a Mach-O (may be TLV-wrapped; check tlv)"
+        t = parse_tlv(data)
+        if t:
+            out["tlv"] = t
+            for e in t:
+                if e.get("is_macho"):
+                    out["macho"] = analyze_macho("")
+        return out
+    out["macho"] = m
+    # parse load commands: LC_SEGMENT_64 = 0x19, LC_UNIXTHREAD = 0x5
+    ncmds = m.get("ncmds") or 0
+    off = 32
+    segments = []  # pragma: no cover (data-dependent)
+    for _ in range(min(ncmds, 64)):
+        if off + 8 > len(data):
+            break
+        cmd, cmdsize = struct.unpack("<II", data[off:off + 8])
+        if cmdsize < 8:
+            break
+        if cmd == 0x19 and cmdsize >= 72:
+            segname = data[off + 8:off + 24].split(b"\x00")[0].decode("latin-1")
+            vmaddr, vmsize = struct.unpack("<QQ", data[off + 24:off + 40])
+            segments.append({"name": segname, "vmaddr": hex(vmaddr),
+                             "size": vmsize})
+        off += cmdsize
+    out["segments"] = segments
+    # strings of interest (version/panic markers)
+    import re
+    interesting = sorted(set(re.findall(rb"[A-Za-z0-9_\/\.\-]{6,}", data[:1 << 20])) &
+                         {s for s in re.findall(rb"[A-Za-z_]{4,}", data[:1 << 16])})
+    out["symbol_markers"] = [s.decode("latin-1", "replace") for s in
+                             interesting[:60] if any(k in s.lower() for k in
+                             (b"sep", b"kbag", b"key", b"pass", b"counter", b"error", b"panic", b"auth"))]
+    return out
+
+
+def diff_binaries(old_bin: str | Path, new_bin: str | Path,
+                  window: int = 4096) -> dict[str, Any]:
+    """Byte-region diff between two decrypted SEPOS builds.
+
+    Reports contiguous changed regions - these are WHERE Apple modified
+    SEP behavior between builds (patch-diffing; each changed region is a
+    candidate study target, esp. near kbag/counter handling).
+    """
+    a = Path(old_bin).read_bytes()
+    b = Path(new_bin).read_bytes()
+    n = min(len(a), len(b))
+    regions = []
+    start = None
+    for i in range(0, n, 16):
+        if a[i:i + 16] != b[i:i + 16]:
+            if start is None:
+                start = i
+        else:
+            if start is not None and i - start >= 16:
+                regions.append((start, i))
+            start = None
+    if start is not None:
+        regions.append((start, n))
+    merged = []
+    for s, e in regions:
+        if merged and s - merged[-1][1] <= window:
+            merged[-1] = (merged[-1][0], e)
+        else:
+            merged.append((s, e))
+    changed = sum(e - s for s, e in merged)
+    return {"old": str(old_bin), "new": str(new_bin),
+            "old_size": len(a), "new_size": len(b),
+            "differing_bytes": changed,
+            "changed_regions": [{"offset": s, "length": e - s,
+                                 "pct": round(100 * (e - s) / max(len(a), 1), 3)}
+                                for s, e in merged[:200]],
+            "region_count": len(merged)}
+
+
+def render_bin(a: dict[str, Any]) -> str:
+    lines = [f"SEPOS binary: {a['file']} ({a['size']:,} B)"]
+    m = a.get("macho") or {}
+    if m:
+        lines += [f"  macho: {m.get('arch')} ncmds={m.get('ncmds')}"]
+    for s in a.get("segments", []):
+        lines.append(f"  SEG {s['name']:<10} {s['vmaddr']}  {s['size']:,}")
+    if a.get("symbol_markers"):
+        lines.append("  markers: " + ", ".join(a["symbol_markers"][:20]))
+    if "error" in a:
+        lines.append(f"  error: {a['error']}")
+    return "\n".join(lines)
+
+
+def render_region_diff(d: dict[str, Any]) -> str:
+    lines = [f"SEPOS binary diff: {d['old']} -> {d['new']}",
+             f"  sizes: {d['old_size']:,} -> {d['new_size']:,} B",
+             f"  differing bytes: {d['differing_bytes']:,} "
+             f"({round(100 * d['differing_bytes'] / max(d['new_size'], 1), 2)}%)",
+             f"  changed regions: {d['region_count']}", ""]
+    for r in d["changed_regions"][:40]:
+        lines.append(f"  0x{r['offset']:08x}  +{r['length']:,}B  ({r['pct']}%)")
+    return "\n".join(lines)

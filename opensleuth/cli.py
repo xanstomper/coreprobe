@@ -1672,6 +1672,53 @@ def cmd_sepos_info(args):
             pass
 
 
+def cmd_gidkeys(args):
+    from . import gidkeys
+    local = {}
+    if gidkeys.KEY_STORE.exists():
+        import json
+        try:
+            local = json.loads(gidkeys.KEY_STORE.read_text())
+        except (json.JSONDecodeError, OSError):
+            local = {}
+    print(gidkeys.render(gidkeys.status(getattr(args, "chip", "")), local))
+
+
+def cmd_sepos_decrypt(args):
+    from . import sepos
+    try:
+        r = sepos.decrypt_payload(args.file, args.gid_key, args.out)
+    except (ValueError, OSError) as exc:
+        print(f"sepos decrypt: {exc}")
+        return
+    if not r.get("ok"):
+        print("sepos decrypt:", r.get("error"))
+        return
+    print(f"decrypted -> {r['decrypted']} ({r['size']:,} B)")
+    if r.get("macho"):
+        m = r["macho"]
+        print(f"  macho {m.get('arch')} size={m.get('size')}")
+    if r.get("tlv"):
+        print(f"  tlv entries: {len(r['tlv'])}")
+    print("next: opensleuth sepos analyze <file> | sepos diff-bin <old> <new>")
+
+
+def cmd_sepos_analyze(args):
+    from . import sepos
+    try:
+        print(sepos.render_bin(sepos.analyze_binary(args.file)))
+    except OSError as exc:
+        print(f"sepos analyze: {exc}")
+
+
+def cmd_sepos_diffbin(args):
+    from . import sepos
+    try:
+        print(sepos.render_region_diff(sepos.diff_binaries(args.old, args.new)))
+    except OSError as exc:
+        print(f"sepos diff-bin: {exc}")
+
+
 def cmd_sepos_diff(args):
     from . import sepos
     try:
@@ -2044,6 +2091,21 @@ def main(argv=None):
     spd.add_argument("older")
     spd.add_argument("newer")
     spd.set_defaults(fn=cmd_sepos_diff)
+    spx = sp_sub.add_parser("decrypt", help="decrypt the SEPOS payload with a GID key (from pwned-device gaster keys)")
+    spx.add_argument("file")
+    spx.add_argument("--gid-key", required=True, help="key file or hex")
+    spx.add_argument("--out", help="output path (default <im4p>.sepos)")
+    spx.set_defaults(fn=cmd_sepos_decrypt)
+    spa = sp_sub.add_parser("analyze", help="struct + marker analysis of a DECRYPTED SEPOS binary")
+    spa.add_argument("file")
+    spa.set_defaults(fn=cmd_sepos_analyze)
+    spb = sp_sub.add_parser("diff-bin", help="byte-region diff between two decrypted SEPOS builds")
+    spg = sp_sub.add_parser("gidkeys", help="honest GID key registry: public keys per chip + local captures")
+    spg.add_argument("--chip", default="")
+    spg.set_defaults(fn=cmd_gidkeys)
+    spb.add_argument("old")
+    spb.add_argument("new")
+    spb.set_defaults(fn=cmd_sepos_diffbin)
 
     pa = sub.add_parser("passattack", help="BFU passcode attack model: keyspace vs SEP attempt budget (path 2) + counter-bypass research targets")
     pa.add_argument("--space", default="6-digit", choices=list(SPACES) if (SPACES := __import__("opensleuth.passattack", fromlist=["SPACES"]).SPACES) else [])
