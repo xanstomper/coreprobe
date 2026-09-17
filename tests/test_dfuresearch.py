@@ -117,6 +117,112 @@ def test_mutation_variants_boundaries():
     assert len(variants) >= 30
 
 
+def test_canonical_sequences_cover_flows():
+    seqs = F.canonical_sequences()
+    assert len(seqs) >= 7
+    all_reqs = {r["bRequest"] for s in seqs for r in s}
+    assert all_reqs == {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+    # every request is DFU-class (0x21 host->dev, 0xA1 dev->host)
+    for s in seqs:
+        for r in s:
+            assert r["bmRequestType"] in (0x21, 0xA1)
+    # upload flow (all-IN) exists alongside download flows (host->dev)
+    assert any(all(r["bmRequestType"] == 0xA1 for r in s) for s in seqs)
+
+
+def test_mutate_sequence_tags_one_step():
+    seq = F.canonical_sequences()[0]
+    out = F.mutate_sequence(seq, 0, seed=7)
+    mutated = [r for r in out if r.get("mutated")]
+    assert len(mutated) == 1
+    # untouched steps keep canonical values
+    assert out[1] == seq[1]
+
+
+def test_sequence_fuzz_stops_on_first_death():
+    class DieDev:
+        def __init__(self):
+            self.sends = 0
+
+        def alive(self):
+            return self.sends < 4
+
+        def ctrl_transfer(self, *a, **k):
+            self.sends += 1
+            if self.sends >= 4:
+                raise TimeoutError("device gone")
+            return b"\x00"
+
+    r = F.run_sequence_fuzz(DieDev(), iterations=100, seed=3,
+                            log=lambda s: None)
+    assert r["crashes"] >= 1
+    assert r["sent"] < 100  # stopped at death
+
+
+def test_sequence_fuzz_records_kill_request():
+    class KillDev:
+        def __init__(self):
+            self.sends = 0
+            self.alive_ok = True
+
+        def alive(self):
+            return self.alive_ok
+
+        def ctrl_transfer(self, bm, b, wv, wi, wl, timeout):
+            self.sends += 1
+            if self.sends >= 5:
+                self.alive_ok = False
+                raise OSError("no such device")
+            return b"\x00"
+
+    r = F.run_sequence_fuzz(KillDev(), iterations=100, seed=5,
+                            log=lambda s: None)
+    assert r["kills"], "expected a recorded kill"
+    k = r["kills"][0]
+    assert "req" in k and "wLength" in k and "seq_step" in k
+    assert "mutated" in k
+
+
+def test_sequence_fuzz_resumes_after_reentry():
+    """Simulates examiner re-entering DFU: alive() recovers, run continues."""
+
+    class ResurrectDev:
+        def __init__(self):
+            self.sends = 0
+            self.dead_until = -1  # send# that kills; stays dead a few polls
+
+        def alive(self):
+            if self.dead_until < 0:
+                return True
+            # recovers after 8 polls (examiner re-enters DFU)
+            self.polls = getattr(self, "polls", 0) + 1
+            return self.polls >= 8
+
+        def ctrl_transfer(self, bm, b, wv, wi, wl, timeout):
+            self.sends += 1
+            if self.dead_until < 0 and self.sends == 5:
+                self.dead_until = self.sends
+                raise OSError("no such device")
+            return b"\x00"
+
+    dev = ResurrectDev()
+
+    def _wait_for_reentry(kill):
+        # mirrors dfu_live.wait_for_reentry: block until alive() recovers
+        for _ in range(200):
+            if dev.alive():
+                return
+            import time
+            time.sleep(0.001)
+
+    r = F.run_sequence_fuzz(dev, iterations=60, seed=11,
+                            log=lambda s: None, resume_wait_s=5.0,
+                            on_death=_wait_for_reentry)
+    assert r["crashes"] >= 1
+    assert r["kills"]
+    assert r["sent"] > 5  # continued after re-entry
+
+
 def test_lab_kit_includes_fuzzer():
     with tempfile.TemporaryDirectory() as td:
         r = S.lab_kit(td, chip="A13")

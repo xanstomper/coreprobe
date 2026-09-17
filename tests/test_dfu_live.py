@@ -127,12 +127,15 @@ def test_alive_false_when_gone(monkeypatch):
     assert t.alive() is False
 
 
-def test_alive_false_when_replaced(monkeypatch):
+def test_alive_rebinds_on_reentry(monkeypatch):
     dev1 = _FakeDev(bus=1, address=2)
     dev2 = _FakeDev(bus=1, address=9)
-    t = L.DfuTransport(dev1, log=lambda s: None)
+    # device "re-enters" DFU at a new address after a death: alive() must
+    # rebind so the hunt resumes on the fresh handle
     monkeypatch.setattr(L, "find_dfu_device", lambda: dev2)
-    assert t.alive() is False
+    t = L.DfuTransport(dev1, log=lambda s: None)
+    assert t.alive() is True
+    assert t.dev is dev2  # rebound
 
 
 def test_verify_reports_dfu_mode():

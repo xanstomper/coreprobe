@@ -109,16 +109,19 @@ class DfuTransport:
 
     # -- dfufuzz interface ------------------------------------------------
     def alive(self) -> bool:
-        """Device still present and still in DFU?"""
+        """Device still present and still in DFU? Rebinds on re-entry so
+        a fuzz hunt can resume across deaths (the device re-enumerates
+        when the examiner re-enters DFU)."""
         if self.dev is None:
             return False
         try:
             cur = find_dfu_device()
             if cur is None:
                 return False
-            # same physical device (bus/address match)
+            # prefer the same physical device; rebind if a fresh handle
+            # appeared (re-entry) - same VID/PID means it is our device
             if (cur.bus, cur.address) != (self.dev.bus, self.dev.address):
-                return False
+                self.dev = cur
             return True
         except Exception:  # noqa: BLE001
             return False
@@ -199,3 +202,21 @@ def render_verify(v: dict[str, Any]) -> str:
     lines.append("next: campaign run <id> --capture <usbmon.txt> --live "
                  "--confirm-live-dfu")
     return "\n".join(lines)
+
+
+def wait_for_reentry(timeout_s: float, poll_s: float = 1.0,
+                     log: Callable[[str], None] = print) -> bool:
+    """Block until an Apple DFU device (pid 0x1227) reappears on USB.
+
+    Used after a fuzz-induced death: the examiner re-enters DFU with the
+    button sequence and the campaign resumes. Returns True if the device
+    came back within timeout_s, False otherwise.
+    """
+    import time
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        dev = find_dfu_device()
+        if dev is not None:
+            return True
+        time.sleep(poll_s)
+    return False

@@ -1605,6 +1605,50 @@ def cmd_campaign_run(args):
         print(f"using default corpus: {len(rows)} standard DFU requests")
     else:
         rows = None
+    if getattr(args, "sequence", False):
+        # sequence-aware hunt: canonical DFU flows, one mutated step per
+        # iteration, death forensics + optional resume across re-entry
+        from .dfufuzz import run_sequence_fuzz
+        kill_log: list[dict[str, Any]] = []
+
+        def _on_death(kill: dict[str, Any]) -> None:
+            kill_log.append(kill)
+            if args.resume_wait > 0:
+                print(f"[resume] re-enter DFU now (vol-up, vol-down, hold "
+                      f"power 10s, then power+vol-down 5s); waiting up to "
+                      f"{args.resume_wait}s...")
+                dfu_live.wait_for_reentry(args.resume_wait)
+
+        fz = run_sequence_fuzz(t, iterations=args.iterations, seed=args.seed,
+                               resume_wait_s=args.resume_wait,
+                               on_death=_on_death if args.resume_wait > 0 else None)
+        kills = fz.get("kills", [])
+        session = campaign.start_session(state, args.campaign_id,
+                                         kind="dfu-fuzz-sequence")
+        campaign.finish_session(state, session["id"], {
+            "iterations": args.iterations, "corpus_size": len(rows or []),
+            "sent": fz["sent"], "crashes": fz["crashes"],
+            "hangups": fz["hangups"], "kills": len(kills)})
+        for k in kills:
+            campaign.add_lead(state, session["id"], "device-death",
+                              (f"seq-step {k['seq_step']} {k['req']} "
+                               f"bm{k['bmRequestType']:#04x} "
+                               f"b{k['bRequest']:#04x} "
+                               f"len{k['wLength']:#06x} "
+                               f"mutated={k['mutated']} err={k['error']}"),
+                              campaign_id=args.campaign_id,
+                              verdict="promising")
+        campaign.save(state)
+        print(campaign.render_session(session))
+        print(f"  sent={fz['sent']} crashes={fz['crashes']} "
+              f"hangups={fz['hangups']} kills={len(kills)}")
+        for k in kills:
+            print(f"  kill: iter{k['iteration']} step{k['seq_step']} "
+                  f"{k['req']} len{k['wLength']:#06x} mutated={k['mutated']}")
+        if kills and args.resume_wait <= 0:
+            print("re-run with --resume-wait 120 to survive deaths and "
+                  "keep hunting unattended")
+        return
     r = campaign.record_fuzz_run(state, args.campaign_id, capture_text,
                                  t, iterations=args.iterations,
                                  seed=args.seed, corpus=rows)
@@ -2106,6 +2150,10 @@ def main(argv=None):
     cgr.add_argument("--live", action="store_true", help="fuzz a real DFU-mode device over PC USB (picoless)")
     cgr.add_argument("--confirm-live-dfu", action="store_true",
                      help="REQUIRED with --live: your research device is in DFU mode and you accept hang/re-entry risk")
+    cgr.add_argument("--sequence", action="store_true",
+                     help="sequence-aware hunt: canonical DFU flows with one mutated step per iteration (recommended)")
+    cgr.add_argument("--resume-wait", type=float, default=0.0,
+                     help="seconds to wait for DFU re-entry after a death before resuming (0 = stop at first death)")
     cgr.set_defaults(fn=cmd_campaign_run)
     cgt = cg_sub.add_parser("triage", help="set a lead verdict (observed|promising|dead-end|escalated|finding)")
     cgt.add_argument("lead_id")
