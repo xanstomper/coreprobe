@@ -424,12 +424,16 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, code, body, ctype="application/json"):
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        if body is not None:
-            self.wfile.write(body if isinstance(body, bytes) else body.encode())
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            if body is not None:
+                self.wfile.write(body if isinstance(body, bytes) else body.encode())
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            # client (desktop/web poller) disconnected mid-response - ignore
+            pass
 
     def _serve_file(self, path):
         full = STATIC / path.lstrip("/")
