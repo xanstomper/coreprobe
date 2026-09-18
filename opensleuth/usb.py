@@ -27,6 +27,104 @@ WTF_PIDS = {"1222"}           # WTF (older devices, DFU-adjacent)
 
 PWN_MARKERS = ("PWND:[CHECKM8]", "PWND:[USBLITER8]", "PWND:")
 
+# Apple serial-format first-3-char prefixes -> chip, for chip detection when a
+# device is in DFU/Recovery (no lockdown ProductType available). These are the
+# well-known, stable 12-char factory serial prefixes by silicon generation.
+# Not exhaustive (Apple reuses prefixes across factories), so callers treat
+# this as a best-effort narrowing, not ground truth.
+SERIAL_CHIP_HINTS = {
+    # Only reasonably-specific 3-4 char prefixes. Apple reuses the first few
+    # chars across generations, so we match by LONGEST prefix and only list
+    # prefixes that are not too generic to be misleading.
+    "A4": ("G24", "G32"),
+    "A5": ("C39L", "H37"),
+    "A6": ("D6", "F4K"),
+    "A7": ("F17", "F18"),
+    "A8": ("F17W", "F78"),
+    "A9": ("C39M", "F2LD", "F22G"),
+    "A10": ("C39", "C7G", "DNP", "C3G", "C6KD"),
+    "A11": ("C6K", "C6Q", "DNP"),
+    "A12": ("C3D", "F17"),
+    "A13": ("DNP", "F2L", "C7G"),
+}
+
+
+def chip_from_serial(serial: Optional[str]) -> str:
+    """Best-effort chip guess from an Apple USB serial prefix.
+
+    Matches the LONGEST known prefix (later chips share early chars with
+    earlier ones, e.g. 'C3' could be a lot of generations). Returns '' when
+    too ambiguous to guess, so callers can fall back to boardconfig/irecovery
+    or ask the examiner rather than guess wrong and run the wrong route.
+    """
+    s = (serial or "").upper()
+    if not s:
+        return ""
+    best_len = -1
+    best_chip = ""
+    for chip, prefixes in SERIAL_CHIP_HINTS.items():
+        for p in prefixes:
+            if s.startswith(p) and len(p) > best_len:
+                best_len = len(p)
+                best_chip = chip
+    return best_chip
+
+
+_BOARDCONFIG_CHIP = {
+    # iPhone board configs -> chip (reliable, read via irecovery in recovery)
+    "d10ap": "A9", "d10apb": "A9", "d10apv": "A9",     # iPhone 6s
+    "d11ap": "A9", "d11apb": "A9", "d11apv": "A9",      # iPhone 6s Plus
+    "n69ap": "A9", "n69uap": "A9",                        # iPhone SE
+    "d20ap": "A10", "d20apb": "A10",                      # iPhone 7
+    "d21ap": "A10", "d21apb": "A10",                      # iPhone 7 Plus
+    "n71ap": "A10",                                        # iPad 6th gen
+    "d22ap": "A11", "d22apb": "A11",                       # iPhone 8
+    "d221ap": "A11", "d221apb": "A11",                     # iPhone 8 Plus
+    "d321ap": "A11", "d321apb": "A11",                     # iPhone X
+    "n115ap": "A11",                                       # iPad 7th gen
+    "d331ap": "A12", "d331pap": "A12",                     # iPhone XS
+    "d332ap": "A12",                                       # iPhone XS Max
+    "n841ap": "A12",                                       # iPhone XR
+    "d411ap": "A13", "d411p": "A13",                       # iPhone 11
+    "d421ap": "A13",                                       # iPhone 11 Pro
+    "d422ap": "A13",                                       # iPhone 11 Pro Max
+    "d791ap": "A13",                                       # SE2
+    "d3pap": "A12",
+}
+
+
+def chip_from_boardconfig(boardconfig: Optional[str]) -> str:
+    """Chip from a recovery-mode iBoot boardconfig (e.g. 'd20ap' -> A10)."""
+    return _BOARDCONFIG_CHIP.get((boardconfig or "").lower().strip(), "")
+
+
+def chip_from_irecovery(sysfs: Path = SYSFS_USB) -> str:
+    """If an Apple device is in Recovery, query iBoot boardconfig via irecovery
+    and map it to a chip. Returns '' if not determinable."""
+    devices = apple_devices(sysfs)
+    if not any(d.get("mode") == "recovery" for d in devices):
+        return ""
+    import subprocess
+    try:
+        p = subprocess.run(["irecovery", "-q", "-c", "getenv boardconfig"],
+                           capture_output=True, text=True, timeout=8)
+        bc = (p.stdout or p.stderr).strip().lower().splitlines()
+        for line in bc:
+            if "=" in line or not line:
+                continue
+            chip = chip_from_boardconfig(line)
+            if chip:
+                return chip
+        # some builds print the value alone on the last line
+        for line in reversed(bc):
+            if line and len(line) < 16:
+                chip = chip_from_boardconfig(line)
+                if chip:
+                    return chip
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
 
 def read_attr(dev: Path, name: str) -> Optional[str]:
     try:

@@ -55,7 +55,17 @@ opensleuth autoexploit --allow-destructive   # allow A10/A11 checkm8 on iOS 16+ 
 ```
 
 It is available on the **Exploits** page in both the desktop app and web studio
-(the "Auto-Exploiter" panel with a start button and live per-route status).
+(the "Auto-Exploiter" panel with a start button and live per-route status), and
+as a one-click **⚡ Auto-Exploit Device** button on the dashboard.
+
+Device detection is daemon-independent: it reads sysfs USB first (works even
+when usbmuxd is down or a device is locked in DFU/BFU), then enriches with
+lockdown/pymobiledevice3 when a service layer is reachable. Chip is determined
+from ProductType, a serial-prefix table, or iBoot boardconfig in recovery mode.
+If a device is in DFU with an ambiguous chip, the auto-exploiter still offers a
+**safe checkm8 probe** (gaster pwn only produces a hit on genuine A7-A11, and is
+harmless on newer silicon), so pressing the button always tries rather than
+silently doing nothing.
 
 Ordering (bootrom first, strongest primitive): checkm8 (A7-A11) / usbliter8
 (A12-A13) → PongoOS/ramdisk chain → Blackbird SEP (A10/T2) → AFU kernel

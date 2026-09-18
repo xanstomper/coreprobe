@@ -93,9 +93,10 @@ class DesktopShellTest(unittest.TestCase):
             d = json.loads(r.read().decode())
         self.assertIsInstance(d, dict)
         allowed = {"model", "product_type", "ios", "build", "udid",
-                   "state", "chip", "error"}
+                   "state", "chip", "error", "mode", "serial",
+                   "product_id", "pwnd"}
         self.assertTrue(set(d) <= allowed)
-        if "state" in d:
+        if d.get("state") not in (None, "", "DFU", "recovery", "pwned-dfu"):
             self.assertIn(d["state"], ("AFU", "BFU"))
 
     def test_backend_tools_api(self):
@@ -393,6 +394,18 @@ class DesktopShellTest(unittest.TestCase):
         self.assertIn("Auto-Exploiter", html)
         self.assertIn("probe", html)
         self.assertIn("ae-pane", html)
+
+    def test_dashboard_has_one_click_autoexploit(self):
+        """The dashboard carries a prominent one-click Auto-Exploit button."""
+        self.win.view.page().runJavaScript("location.hash = 'dashboard'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Auto-Exploit"),
+            "one-click auto-exploit button did not render on dashboard")
+        html = self._page_html()
+        self.assertIn("Auto-Exploit Device", html)
+        self.assertIn("quickAction('autoexploit')", html)
 
     def test_chats_page_renders_in_browser(self):
         self.win.view.page().runJavaScript("location.hash = 'chats'")

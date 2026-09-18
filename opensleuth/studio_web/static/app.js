@@ -180,6 +180,7 @@ function pageDashboard() {
       <div style="padding:13px"><div class="section-grid">${sections}</div></div></div>
     <div class="panel-card"><div class="panel-card-head">Quick Actions</div>
       <div class="quick-actions" style="padding:11px 13px">
+        <button class="btn primary" style="font-weight:700" onclick="quickAction('autoexploit')">⚡ Auto-Exploit Device</button>
         <button class="btn primary" onclick="quickAction('add')">Add Device</button>
         <button class="btn" onclick="quickAction('parse')">Parse Image</button>
         <button class="btn" onclick="quickAction('report')">Generate Report</button>
@@ -922,6 +923,25 @@ function filterTable(id, q) {
     tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none");
 }
 async function quickAction(a) {
+  if (a === "autoexploit") {
+    // One-button detect-and-exploit: jump to the Exploits page and fire the
+    // auto-exploiter (probes the attached device, runs routes until one hits).
+    location.hash = "exploits";
+    toast("Auto-exploiter: probing attached device and trying routes...", "blue");
+    try {
+      const r = await api("/api/autoexploit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allow_destructive: false }),
+      });
+      if (r.busy) toast("Auto-exploiter already running", "amber");
+      else if (r.started) toast("Auto-exploiter started", "green");
+      else toast("Auto-exploiter failed to start", "red");
+    } catch { toast("Auto-exploiter request failed", "red"); }
+    await render();
+    setTimeout(pollAutoExploit, 1500);
+    return;
+  }
   if (a === "add") location.hash = "devices";
   else if (a === "open") {
     const id = prompt("Case ID to open:", CASES[0]?.case_id || "");

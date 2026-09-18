@@ -319,6 +319,13 @@ def cmd_acquire_bfu(args):
         except Exception:  # noqa: BLE001
             pass
     if not chip:
+        # In Recovery mode iBoot exposes boardconfig -> chip (reliable, no pwn)
+        try:
+            from .usb import chip_from_irecovery
+            chip = chip_from_irecovery()
+        except Exception:  # noqa: BLE001
+            pass
+    if not chip:
         chip = "unknown"
     res["checkm8"]["chip"] = chip
     from .matrix import CHIP_RANK, USBLITER8_CHIPS
@@ -520,13 +527,11 @@ def cmd_acquire_bfu(args):
 
 
 def _chip_from_serial(serial):
-    """Best-effort chip guess from USB serial heuristics; empty if unknown."""
-    s = serial.upper()
-    if s.startswith(("C39", "C3D", "F17", "F18")):
-        return "A12"
-    if s.startswith(("DNP", "F2L", "C7G")):
-        return "A13"
-    return ""
+    """Best-effort chip guess from USB serial heuristics; empty if unknown.
+    Delegates to the shared usb.chip_from_serial table (covers A4-A13)."""
+    from .usb import chip_from_serial as _cfs
+
+    return _cfs(serial)
 
 
 def cmd_acquire_checkm8(args):

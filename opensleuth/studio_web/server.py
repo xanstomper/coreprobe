@@ -25,33 +25,75 @@ def _run(cmd, timeout=60):
 
 
 def _device():
+    """Robust device detection.
+
+    Primary source = sysfs USB (usb_state) which needs NO daemon and always
+    reflects what is physically attached. Enrichment (chip off ProductType,
+    model name, iOS build) comes from lockdown/pymobiledevice3 only when the
+    service layer is actually reachable - never lets a usbmuxd outage or a
+    non-JSON error line hide a plugged-in device.
+    """
+    from ..usb import usb_state, chip_from_serial, chip_from_irecovery
+    from ..matrix import chip_for, KNOWN_DEVICES
+
+    st = usb_state()
+    devs = st.get("devices", [])
+    if not devs:
+        return None
+    # Prefer a booted 'normal' device for service-layer data; else the first.
+    booted = next((d for d in devs if d.get("mode") == "normal"), devs[0])
+    product = booted.get("product") or ""
+    serial = booted.get("serial") or ""
+    product_id = booted.get("product_id") or ""
+    mode = booted.get("mode") or "normal"
+
+    # PWN markers / state from sysfs (no daemon required)
+    pwnd = "pwnd" in mode
+    state = {"dfu": "DFU", "pwned-dfu": "pwned-dfu", "recovery": "recovery"}.get(mode, "")
+
+    info = {}
+    # Try to enrich with ProductType/iOS via pymobiledevice3 usbmux (tolerant)
     try:
-        p = _run(["pymobiledevice3", "usbmux", "list"], timeout=15)
-        if p.returncode == 0:
-            devs = json.loads(p.stdout)
-            if devs:
-                d = devs[0]
-                state = "BFU"
-                try:
-                    v = _run(["idevicepair", "validate"], timeout=15)
-                    if v.returncode == 0 and "SUCCESS" in v.stdout:
-                        state = "AFU"
-                except Exception:
-                    pass
-                from ..matrix import chip_for, KNOWN_DEVICES
-                pt = d.get("ProductType", "")
-                return {
-                    "model": KNOWN_DEVICES.get(pt, (pt, None))[0] or pt,
-                    "product_type": pt,
-                    "ios": d.get("ProductVersion", "?"),
-                    "build": d.get("BuildVersion", "?"),
-                    "udid": d.get("Identifier") or d.get("UniqueDeviceID", ""),
-                    "state": state,
-                    "chip": chip_for(pt) or "?",
-                }
-    except Exception as exc:
-        return {"error": str(exc)}
-    return None
+        p = _run(["pymobiledevice3", "usbmux", "list"], timeout=10)
+        if p.returncode == 0 and p.stdout.strip():
+            try:
+                parsed = json.loads(p.stdout)
+                d0 = (parsed[0] if isinstance(parsed, list) and parsed else
+                      parsed.get("devices", [{}])[0] if isinstance(parsed, dict) else {})
+                info = d0 if isinstance(d0, dict) else {}
+            except (ValueError, IndexError):
+                info = {}
+    except Exception:
+        info = {}
+
+    pt = info.get("ProductType", "")
+    if not state:
+        # booted -> locked (BFU) or unlocked/paired (AFU)
+        state = "AFU" if _paired() else "BFU"
+
+    chip = chip_for(pt) or chip_from_serial(serial) or chip_from_irecovery() or ""
+    return {
+        "model": KNOWN_DEVICES.get(pt, (pt or product or "Apple device"))[0],
+        "product_type": pt or product or "",
+        "ios": info.get("ProductVersion", ""),
+        "build": info.get("BuildVersion", ""),
+        "udid": info.get("Identifier") or info.get("UniqueDeviceID", "") or serial,
+        "state": state,
+        "chip": chip or "",
+        "mode": mode,
+        "serial": serial,
+        "product_id": product_id,
+        "pwnd": pwnd,
+    }
+
+
+def _paired():
+    """True when a booted device is paired/unlocked (AFU)."""
+    try:
+        v = _run(["idevicepair", "validate"], timeout=8)
+        return v.returncode == 0 and "SUCCESS" in v.stdout
+    except Exception:
+        return False
 
 
 def _apps():

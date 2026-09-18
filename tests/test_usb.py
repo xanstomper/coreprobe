@@ -164,3 +164,72 @@ class TestWatchDfu:
         )
         assert snap["dfu"] is True
         assert "dfu" in seen and "normal" in seen
+
+
+class TestChipDetection:
+    """chip_from_serial / chip_from_boardconfig heuristics used across the
+    web, probe, and auto-exploiter detection paths (DFU/Recovery chip detect)."""
+
+    def test_serial_a7(self):
+        assert usb.chip_from_serial("F17LDQ1TFF9R") == "A7"
+        assert usb.chip_from_serial("F18AB") == "A7"
+
+    def test_serial_a10(self):
+        assert usb.chip_from_serial("C3G1234") == "A10"
+        assert usb.chip_from_serial("DNPNYES1G5MP") == "A10"
+
+    def test_serial_a11(self):
+        assert usb.chip_from_serial("C6KQK0C6H6WC") == "A11"
+
+    def test_serial_a13(self):
+        assert usb.chip_from_serial("F2LW2E4GTC0Y") == "A13"
+
+    def test_serial_unknown_returns_empty(self):
+        assert usb.chip_from_serial("ZZZZ") == ""
+        assert usb.chip_from_serial("") == ""
+        assert usb.chip_from_serial(None) == ""
+
+    def test_boardconfig_maps_to_chip(self):
+        assert usb.chip_from_boardconfig("d20ap") == "A10"    # iPhone 7
+        assert usb.chip_from_boardconfig("D321AP") == "A11"   # iPhone X (case-insensitive)
+        assert usb.chip_from_boardconfig("n841ap") == "A12"   # iPhone XR
+        assert usb.chip_from_boardconfig("d411ap") == "A13"   # iPhone 11
+        assert usb.chip_from_boardconfig("nope") == ""
+
+
+class TestChipProbeFallback:
+    """Auto-exploiter builds a safe checkm8 probe when a DFU device's chip
+    cannot be determined (no ProductType in DFU, ambiguous serial)."""
+
+    def test_dfu_unknown_chip_gets_probe(self, monkeypatch):
+        from opensleuth.exploitrunner import probe_target, build_plan
+
+        def fake_usb_state():
+            return {"devices": [{"product": "Apple Mobile Device (DFU Mode)",
+                                 "manufacturer": "Apple Inc.", "serial": "ZZZZ",
+                                 "product_id": "1227", "mode": "dfu"}],
+                    "any": True, "dfu": True, "recovery": False, "pwnd": False,
+                    "pwnd_usbliter8": False, "pwnd_checkm8": False}
+
+        monkeypatch.setattr("opensleuth.exploitrunner.usb_state", fake_usb_state)
+        t = probe_target()
+        assert t.present and t.state == "DFU" and not t.chip
+        plan = build_plan(t)
+        names = [i.name for i in plan]
+        assert any("chip-unknown probe" in n for n in names), names
+
+    def test_dfu_known_a10_gets_checkm8(self, monkeypatch):
+        from opensleuth.exploitrunner import probe_target, build_plan
+
+        def fake_usb_state():
+            return {"devices": [{"product": "Apple Mobile Device (DFU Mode)",
+                                 "manufacturer": "Apple Inc.", "serial": "C3G1234",
+                                 "product_id": "1227", "mode": "dfu"}],
+                    "any": True, "dfu": True, "recovery": False, "pwnd": False,
+                    "pwnd_usbliter8": False, "pwnd_checkm8": False}
+
+        monkeypatch.setattr("opensleuth.exploitrunner.usb_state", fake_usb_state)
+        t = probe_target()
+        assert t.chip == "A10"
+        plan = build_plan(t)
+        assert any(i.name == "checkm8" for i in plan)
