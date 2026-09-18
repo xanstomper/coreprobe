@@ -175,6 +175,8 @@ table.data td.num { font-variant-numeric: tabular-nums; }
 .status-pill.amber { color: var(--amber); border-color: rgba(217,163,91,35); background: rgba(217,163,91,10); }
 .status-pill.red { color: var(--red); border-color: rgba(217,107,107,35); background: rgba(217,107,107,10); }
 .status-pill.blue { color: var(--blue); border-color: rgba(111,155,209,35); background: rgba(111,155,209,10); }
+.status-pill.purple { color: #b288d9; border-color: rgba(178,136,217,35); background: rgba(178,136,217,10); }
+.status-pill.cyan { color: #5bc0de; border-color: rgba(91,192,222,35); background: rgba(91,192,222,10); }
 .status-pill.gray { color: var(--muted); border-color: var(--border2); background: var(--panel2); }
 
 /* SYSTEM LOG */

@@ -26,6 +26,7 @@ VERSION = "CoreProbe 0.2 desktop"
 NAV = [
     ("dashboard", "Dashboard", "Ctrl+1"),
     ("exploits", "Exploits", "Ctrl+2"),
+    ("tools", "Tools", "Ctrl+T"),
     ("research", "Research", "Ctrl+6"),
     ("bfu", "BFU Lab", "Ctrl+7"),
     ("evidence", "Evidence", "Ctrl+8"),
@@ -121,6 +122,11 @@ class MainWindow(QMainWindow):
         about = QAction("About", self)
         about.triggered.connect(self._about)
         help_m.addAction(about)
+        diag = QAction("Diagnostics (Doctor)", self)
+        diag.setShortcut(QKeySequence("Ctrl+D"))
+        diag.triggered.connect(lambda: self.view.page().runJavaScript(
+            "location.hash='tools'"))
+        help_m.addAction(diag)
         web = QAction("GitHub", self)
         web.triggered.connect(lambda: self.view.load(
             QUrl("https://github.com/xanstomper/coreprobe")))

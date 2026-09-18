@@ -360,6 +360,62 @@ class DesktopShellTest(unittest.TestCase):
         self.assertIn("Tools", nav["html"])
         self.assertIn("Exploits", nav["html"])
 
+    def test_tools_page_has_doctor_diagnostics(self):
+        self.win.view.page().runJavaScript("location.hash = 'tools'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Workstation Diagnostics"),
+            "doctor panel did not render on tools page")
+        html = self._page_html()
+        self.assertIn("Doctor", html)
+        self.assertIn("PASSED", html)
+
+    def test_exploits_page_has_target_evaluator(self):
+        self.win.view.page().runJavaScript("location.hash = 'exploits'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Target Device"),
+            "target evaluator did not render on exploits page")
+        html = self._page_html()
+        self.assertIn("Target Chip", html)
+        self.assertIn("Plain PC+USB", html)
+
+    def test_chats_page_renders_in_browser(self):
+        self.win.view.page().runJavaScript("location.hash = 'chats'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Chats"),
+            "chats page did not render")
+        html = self._page_html()
+        self.assertNotIn("[object Promise]", html)
+        self.assertIn("Chats", html)
+
+    def test_location_page_renders_in_browser(self):
+        self.win.view.page().runJavaScript("location.hash = 'location'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Location"),
+            "location page did not render")
+        html = self._page_html()
+        self.assertNotIn("[object Promise]", html)
+        self.assertIn("Telemetry", html)
+
+    def test_reports_page_has_uco_and_cert(self):
+        self.win.view.page().runJavaScript("location.hash = 'reports'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Evidentiary Certification"),
+            "reports page did not render")
+        html = self._page_html()
+        self.assertNotIn("[object Promise]", html)
+        self.assertIn("case_uco.jsonld", html)
+        self.assertIn("certification.json", html)
+
 
 if __name__ == "__main__":
     unittest.main()

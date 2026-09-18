@@ -103,12 +103,15 @@ function buildNav() {
   document.querySelectorAll(".nav-item").forEach(n => n.onclick = () => location.hash = n.dataset.nav);
 }
 function navCounts() {
+  const chatTotal = (ARTIFACTS.messages?.length || 0) + (ARTIFACTS.whatsapp?.length || 0) +
+                    (ARTIFACTS.telegram?.length || 0) + (ARTIFACTS.signal?.length || 0);
   const map = {
     applications: APPS.length || "",
     browser: (ARTIFACTS.history?.length || 0) + (ARTIFACTS.bookmarks?.length || 0) || "",
-    chats: ARTIFACTS.messages?.length || "",
+    chats: chatTotal || "",
     contacts: ARTIFACTS.contacts?.length || "",
     calls: ARTIFACTS.calls?.length || "",
+    location: ARTIFACTS.locations?.length || "",
     media: ARTIFACTS.media_index?.length || "",
     messages: ARTIFACTS.messages?.length || "",
     files: (ARTIFACTS.app_databases?.length || 0) || "",
@@ -401,39 +404,133 @@ function switchTab(el, prefix, i) {
 }
 
 /* ---------------- chats / messages ---------------- */
+let chatServiceFilter = "all";
+
+function _allChats() {
+  const all = [];
+  (ARTIFACTS.messages || []).forEach(m => all.push({
+    ...m,
+    service: m.service || "SMS/iMessage",
+    source_db: "sms.db"
+  }));
+  (ARTIFACTS.whatsapp || []).forEach(m => all.push({
+    ...m,
+    service: "WhatsApp",
+    source_db: "ChatStorage.sqlite"
+  }));
+  (ARTIFACTS.telegram || []).forEach(m => all.push({
+    ...m,
+    service: "Telegram",
+    source_db: "tgdata.db"
+  }));
+  (ARTIFACTS.signal || []).forEach(m => all.push({
+    ...m,
+    service: "Signal",
+    source_db: "Signal.sqlite"
+  }));
+  return all;
+}
+
+function selectChatFilter(svc) {
+  chatServiceFilter = svc;
+  chatSelected = null;
+  render();
+}
+
 function pageChats() {
-  const msgs = ARTIFACTS.messages || [];
-  if (!msgs.length) return emptyPage("Chats", "Chat apps and conversations.", "No chat artifacts yet. Run an acquisition with the backup option to populate conversations.");
+  const all = _allChats();
+  if (!all.length) {
+    return emptyPage("Chats", "Chat apps and conversations.",
+      "No chat artifacts yet. Run an acquisition with backup or parse ChatStorage.sqlite / tgdata.db / sms.db to populate conversations.");
+  }
+  const filtered = chatServiceFilter === "all"
+    ? all
+    : all.filter(m => (m.service || "").toLowerCase().includes(chatServiceFilter));
+
   const chats = {};
-  msgs.forEach(m => { const k = m.chat || m.sender || "Unknown"; (chats[k] = chats[k] || []).push(m); });
+  filtered.forEach(m => {
+    const k = m.chat || m.sender || "Unknown";
+    (chats[k] = chats[k] || []).push(m);
+  });
   const keys = Object.keys(chats);
-  const sel = chatSelected && chats[chatSelected] ? chatSelected : keys[0];
+  const sel = chatSelected && chats[chatSelected] ? chatSelected : (keys[0] || "");
   const thread = (chats[sel] || []).map(m => `
-    <div class="bubble ${m.from_me ? "me" : "them"}">${esc(m.text || "(attachment)")}
+    <div class="bubble ${m.from_me ? "me" : "them"}">
+      ${esc(m.text || "(attachment)")}
       ${m.attachments?.length ? `<div class="mono" style="margin-top:2px">attachment: ${esc(m.attachments.join(", "))}</div>` : ""}
-      <div class="bubble-time">${esc(m.sender || "")} · ${fmtDate(m.date)}</div></div>`).join("");
+      <div class="bubble-time">${esc(m.sender || "")} · ${fmtDate(m.date)} · <span class="mono">${esc(m.service || "")}</span></div>
+    </div>`).join("");
+
+  const srvBadge = srv => {
+    const s = (srv || "").toLowerCase();
+    const cls = s.includes("whatsapp") ? "green" : s.includes("telegram") ? "blue" : s.includes("signal") ? "cyan" : "gray";
+    return `<span class="status-pill ${cls}" style="font-size:9.5px;padding:0 4px;margin-left:4px">${esc(srv || "Chat")}</span>`;
+  };
+
+  const selItem = chats[sel]?.[0];
+  const services = ["all", "whatsapp", "telegram", "signal", "sms"];
+  const counts = {
+    all: all.length,
+    whatsapp: (ARTIFACTS.whatsapp || []).length,
+    telegram: (ARTIFACTS.telegram || []).length,
+    signal: (ARTIFACTS.signal || []).length,
+    sms: (ARTIFACTS.messages || []).length,
+  };
+
   return `
-    <div class="page-title">Chats</div><div class="page-sub">Conversation analysis with artifact metadata.</div>
+    <div class="page-title">Chats & Messaging Intelligence</div>
+    <div class="page-sub">Conversation analysis across WhatsApp, Telegram, Signal, and SMS/iMessage.</div>
+    <div class="filter-bar" style="margin-bottom:12px;gap:6px">
+      ${services.map(s => `
+        <button class="btn ${chatServiceFilter === s ? "primary" : ""}" onclick="selectChatFilter('${s}')">
+          ${s.toUpperCase()} (${counts[s] || 0})
+        </button>`).join("")}
+    </div>
     <div class="chat-wrap">
-      <div class="chat-list">${keys.map(k => `<div class="chat-item ${k === sel ? "active" : ""}" onclick="selectChat('${esc(k).replace(/'/g, "\\'")}')"><div class="chat-name">${esc(k)}</div><div class="chat-preview">${esc((chats[k].slice(-1)[0]?.text || "").slice(0, 40))}</div></div>`).join("")}</div>
+      <div class="chat-list">
+        ${keys.map(k => `
+          <div class="chat-item ${k === sel ? "active" : ""}" onclick="selectChat('${esc(k).replace(/'/g, "\\'")}')">
+            <div class="chat-name">${esc(k)} ${srvBadge(chats[k][0]?.service)}</div>
+            <div class="chat-preview">${esc((chats[k].slice(-1)[0]?.text || "").slice(0, 40))}</div>
+          </div>`).join("") || '<div class="empty-state">No conversations for this filter.</div>'}
+      </div>
       <div class="chat-thread">${thread || '<div class="empty-state">No messages</div>'}</div>
       <div class="chat-meta">
-        <div class="meta-row"><div class="meta-key">Conversation</div>${esc(sel)}</div>
+        <div class="meta-row"><div class="meta-key">Conversation</div>${esc(sel || "—")}</div>
         <div class="meta-row"><div class="meta-key">Messages</div>${chats[sel]?.length || 0}</div>
-        <div class="meta-row"><div class="meta-key">Service</div>${esc(chats[sel]?.[0]?.service || "—")}</div>
-        <div class="meta-row"><div class="meta-key">Source</div><span class="mono">sms.db</span></div>
+        <div class="meta-row"><div class="meta-key">Service</div>${esc(selItem?.service || "—")}</div>
+        <div class="meta-row"><div class="meta-key">Source DB</div><span class="mono">${esc(selItem?.source_db || "sms.db")}</span></div>
+        ${selItem?.chat_jid ? `<div class="meta-row"><div class="meta-key">Identifier / JID</div><span class="mono">${esc(selItem.chat_jid)}</span></div>` : ""}
       </div>
     </div>`;
 }
 function selectChat(k) { chatSelected = k; render(); }
+
 function pageMessages() {
-  const msgs = ARTIFACTS.messages || [];
-  const rows = msgs.map(m => `<tr><td class="mono">${fmtDate(m.date)}</td><td>${esc(m.chat || m.sender || "")}</td><td>${m.from_me ? "Outgoing" : "Incoming"}</td><td>${esc(m.service || "")}</td><td>${esc(m.text || "(attachment)")}</td><td>${esc((m.attachments || []).join(", ") || "—")}</td></tr>`).join("")
-    || `<tr><td colspan="6" class="empty-state">No message artifacts. Run an acquisition with backup first.</td></tr>`;
+  const all = _allChats();
+  const rows = all.map(m => `
+    <tr>
+      <td class="mono">${fmtDate(m.date)}</td>
+      <td>${esc(m.chat || m.sender || "")}</td>
+      <td>${m.from_me ? "Outgoing" : "Incoming"}</td>
+      <td><span class="status-pill ${String(m.service).toLowerCase().includes("whatsapp") ? "green" : String(m.service).toLowerCase().includes("telegram") ? "blue" : String(m.service).toLowerCase().includes("signal") ? "cyan" : "gray"}">${esc(m.service || "SMS")}</span></td>
+      <td>${esc(m.text || "(attachment)")}</td>
+      <td>${esc((m.attachments || []).join(", ") || "—")}</td>
+      <td class="mono">${esc(m.source_db || "sms.db")}</td>
+    </tr>`).join("")
+    || `<tr><td colspan="7" class="empty-state">No message artifacts. Run an acquisition or parse chat databases first.</td></tr>`;
   return `
-    <div class="page-title">Messages</div><div class="page-sub">SMS, MMS, RCS message evidence.</div>
-    <div class="panel-card"><div class="filter-bar"><input class="form-input" placeholder="Search messages..." style="width:220px" oninput="filterTable('msg-table', this.value)"><span class="mono" style="margin-left:auto">${msgs.length} messages</span></div>
-    <table class="data" id="msg-table"><thead><tr><th>Timestamp</th><th>Chat</th><th>Direction</th><th>Service</th><th>Text</th><th>Attachments</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <div class="page-title">Messages</div><div class="page-sub">SMS, MMS, WhatsApp, Telegram, and Signal messages.</div>
+    <div class="panel-card">
+      <div class="filter-bar">
+        <input class="form-input" placeholder="Search messages..." style="width:260px" oninput="filterTable('msg-table', this.value)">
+        <span class="mono" style="margin-left:auto">${all.length} messages indexed</span>
+      </div>
+      <table class="data" id="msg-table">
+        <thead><tr><th>Timestamp</th><th>Chat</th><th>Direction</th><th>Service</th><th>Text</th><th>Attachments</th><th>Source</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 /* ---------------- contacts / calls / calendars ---------------- */
@@ -475,13 +572,105 @@ function pageCloud() {
     <div class="panel-card"><div class="panel-card-head">iCloud Acquisition</div>
       <div class="empty-state" style="text-align:left;padding:13px">Full iCloud backup pull requires Apple ID credentials and 2FA. Use the desktop CLI: <span class="mono">pymobiledevice3 icloud</span> — UI integration is on the roadmap.</div></div>`;
 }
+
+let locationTypeFilter = "all";
+function filterLocationType(t) {
+  locationTypeFilter = t;
+  render();
+}
+async function runLocationScan() {
+  const d = document.getElementById("loc-scan-path")?.value.trim();
+  const out = document.getElementById("loc-scan-out");
+  if (!d) { if (out) out.innerHTML = '<span class="mono">enter path</span>'; return; }
+  if (out) out.innerHTML = '<span class="mono">discovering location databases...</span>';
+  const r = await api("/api/appcatalog?dir=" + encodeURIComponent(d));
+  const dbs = (r && r.databases) || [];
+  const locDbs = dbs.filter(x => /consolidated|location|cellular|routined|cache_encrypted/i.test(x.path || x.rel || ""));
+  if (out) {
+    out.innerHTML = `
+      <div class="log-event"><span class="dot ${locDbs.length ? "green" : "amber"}"></span>
+      <div class="log-text">Found <b>${locDbs.length}</b> potential location databases in extraction.</div></div>
+      ${locDbs.slice(0, 5).map(db => `<div class="mono" style="padding-left:14px">· ${esc(db.rel || db.path)}</div>`).join("")}`;
+  }
+}
+
 function pageLocation() {
+  const locs = ARTIFACTS.locations || [];
+  if (!locs.length) {
+    return `
+      <div class="page-title">Location & Telemetry Intelligence</div>
+      <div class="page-sub">GPS fixes, Cell Tower handshakes, and Wi-Fi geolocation tracking.</div>
+      <div class="two-col">
+        <div class="panel-card">
+          <div class="panel-card-head">Location Records</div>
+          <div class="empty-state">No location artifacts in the current extraction.<br>
+          Location data is extracted from <span class="mono">consolidated.db</span>, <span class="mono">cache_encryptedA.db</span>, or <span class="mono">com.apple.routined</span> cache.</div>
+          <div style="padding:0 13px 13px">
+            <div class="filter-bar">
+              <input class="form-input" id="loc-scan-path" placeholder="Extraction path (e.g. ~/cases/C1/backup)" style="width:320px" value="${esc(ACTIVE_CASE?.destination || "")}">
+              <button class="btn" onclick="runLocationScan()">Scan Directory</button>
+            </div>
+            <div id="loc-scan-out" style="margin-top:8px"></div>
+          </div>
+        </div>
+        <div class="panel-card">
+          <div class="panel-card-head">Map Visualization</div>
+          <div class="empty-state" style="height:260px;display:flex;align-items:center;justify-content:center">
+            Map visualization populates when location records are parsed.
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const types = {};
+  locs.forEach(l => { const t = l.type || "Other"; types[t] = (types[t] || 0) + 1; });
+  const filtered = locationTypeFilter === "all" ? locs : locs.filter(l => (l.type || "Other") === locationTypeFilter);
+  const rows = filtered.slice(0, 500).map(r => `
+    <tr>
+      <td class="mono">${fmtDate(r.date)}</td>
+      <td><span class="status-pill ${r.type === 'GPSFix' ? 'green' : r.type === 'CellTower' ? 'purple' : r.type === 'WiFi' ? 'blue' : 'cyan'}">${esc(r.type || "Location")}</span></td>
+      <td class="mono">${esc(Number(r.latitude || 0).toFixed(6))}, ${esc(Number(r.longitude || 0).toFixed(6))}</td>
+      <td class="num">${r.confidence !== undefined && r.confidence !== null ? esc(r.confidence) : "—"}</td>
+      <td>${esc(r.details || "—")}</td>
+      <td><a class="btn" style="padding:2px 8px;font-size:10px;text-decoration:none" href="https://www.openstreetmap.org/?mlat=${r.latitude}&mlon=${r.longitude}#map=16/${r.latitude}/${r.longitude}" target="_blank">Map ↗</a></td>
+    </tr>`).join("");
+
+  const latest = locs[0];
+  const typeKeys = ["all", ...Object.keys(types)];
+
   return `
-    <div class="page-title">Location</div><div class="page-sub">GPS and location history.</div>
-    <div class="two-col">
-      <div class="panel-card"><div class="panel-card-head">Location Records</div><div class="empty-state">No location artifacts in the current extraction.<br>Location data requires a filesystem-level extraction (jailbreak route) or Significant Locations database parsing (roadmap).</div></div>
-      <div class="panel-card"><div class="panel-card-head">Map</div><div class="empty-state" style="height:260px;display:flex;align-items:center;justify-content:center">Map visualization requires location records.</div></div>
-    </div>`;
+    <div class="page-title">Location & Telemetry Intelligence</div>
+    <div class="page-sub">GPS fixes, Cell Tower handshakes, and Wi-Fi geolocation tracking.</div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+      <div class="metric-card"><div class="metric-body"><div class="metric-label">Total Fixes</div><div class="metric-value">${locs.length}</div></div></div>
+      <div class="metric-card"><div class="metric-body"><div class="metric-label">GPS Fixes</div><div class="metric-value">${types["GPSFix"] || 0}</div></div></div>
+      <div class="metric-card"><div class="metric-body"><div class="metric-label">Cell Towers</div><div class="metric-value">${types["CellTower"] || 0}</div></div></div>
+      <div class="metric-card"><div class="metric-body"><div class="metric-label">Wi-Fi Geolocation</div><div class="metric-value">${types["WiFi"] || 0}</div></div></div>
+      <div class="metric-card"><div class="metric-body"><div class="metric-label">Routine Visits</div><div class="metric-value">${types["RoutineVisit"] || 0}</div></div></div>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head">Location History (${filtered.length} points)</div>
+      <div class="filter-bar" style="gap:6px">
+        ${typeKeys.map(t => `<button class="btn ${locationTypeFilter === t ? "primary" : ""}" onclick="filterLocationType('${t}')">${t.toUpperCase()} (${t === 'all' ? locs.length : (types[t] || 0)})</button>`).join("")}
+        <input class="form-input" placeholder="Search coordinates, details..." style="width:220px;margin-left:auto" oninput="filterTable('loc-table', this.value)">
+      </div>
+      <table class="data" id="loc-table">
+        <thead><tr><th>Timestamp</th><th>Type</th><th>Coordinates (Lat, Lon)</th><th>Confidence</th><th>Details</th><th>Map</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="empty-state">No records match this filter.</td></tr>'}</tbody>
+      </table>
+    </div>
+    ${latest ? `
+    <div class="panel-card">
+      <div class="panel-card-head">Most Recent Fix Preview</div>
+      <div class="log-event">
+        <span class="dot green"></span>
+        <div class="log-body">
+          <div class="log-text"><b>${esc(latest.type || "Fix")}</b> at <span class="mono">${esc(Number(latest.latitude || 0).toFixed(6))}, ${esc(Number(latest.longitude || 0).toFixed(6))}</span> · ${fmtDate(latest.date)}</div>
+          <div class="log-time">${esc(latest.details || "")}</div>
+        </div>
+        <a class="btn primary" href="https://www.openstreetmap.org/?mlat=${latest.latitude}&mlon=${latest.longitude}#map=16/${latest.latitude}/${latest.longitude}" target="_blank">Open on OpenStreetMap</a>
+      </div>
+    </div>` : ""}`;
 }
 
 /* ---------------- media / files ---------------- */
@@ -550,10 +739,13 @@ function pageForensics() {
 
       <div class="ftab" id="ftab-2" style="display:none">
         <div style="padding:13px">
-          <div class="form-field"><span class="form-label">File path (under evidence directory)</span>
-          <input class="form-input" id="hash-path" placeholder="/home/.../cases/.../file" style="width:100%;max-width:480px"></div>
-          <div style="margin-top:8px"><button class="btn" onclick="doHash()">Compute SHA-256</button></div>
-          <div id="hash-result" class="mono" style="margin-top:8px;word-break:break-all"></div>
+          <div class="form-field"><span class="form-label">File path (under evidence directory / ~/cases)</span>
+          <input class="form-input" id="hash-path" placeholder="/home/.../cases/.../file" style="width:100%;max-width:540px"></div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button class="btn primary" onclick="doMultiHash()">Compute Multi-Hash (MD5 + SHA-256 + SHA-512)</button>
+            <button class="btn" onclick="doHash()">Compute SHA-256</button>
+          </div>
+          <div id="hash-result" style="margin-top:12px"></div>
         </div>
       </div>
 
@@ -588,7 +780,11 @@ function artifactSearch(q) {
     if (hits.length) groups.push(`<div class="panel-heading" style="padding:8px 13px 0">${name} — ${hits.length} hit(s)</div>
       <table class="data"><tbody>${hits.map(r => `<tr><td class="mono">${fmtDate(r.date || r.created || r.modified)}</td><td>${esc(fields.map(f => r[f]).filter(Boolean).join(" · ").slice(0, 160))}</td></tr>`).join("")}</tbody></table>`);
   };
-  scan("Messages", ARTIFACTS.messages, ["text", "sender", "chat"]);
+  scan("Messages (SMS/iMessage)", ARTIFACTS.messages, ["text", "sender", "chat"]);
+  scan("WhatsApp", ARTIFACTS.whatsapp, ["text", "sender", "chat"]);
+  scan("Telegram", ARTIFACTS.telegram, ["text", "sender", "chat"]);
+  scan("Signal", ARTIFACTS.signal, ["text", "sender", "chat"]);
+  scan("Location & Telemetry", ARTIFACTS.locations, ["type", "details"]);
   scan("Contacts", ARTIFACTS.contacts, ["name", "organization"]);
   scan("Calls", ARTIFACTS.calls, ["phone", "type"]);
   scan("History", ARTIFACTS.history, ["url", "title"]);
@@ -598,10 +794,32 @@ function artifactSearch(q) {
 }
 async function doHash() {
   const p = document.getElementById("hash-path").value.trim();
-  if (!p) return;
-  document.getElementById("hash-result").textContent = "computing...";
+  const out = document.getElementById("hash-result");
+  if (!p) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  out.innerHTML = '<span class="mono">computing SHA-256...</span>';
   const r = await api("/api/hash", {method: "POST", body: JSON.stringify({path: p})});
-  document.getElementById("hash-result").textContent = r.sha256 ? `sha256: ${r.sha256}` : (r.error || "failed");
+  out.innerHTML = r.sha256 ? `<div class="mono" style="word-break:break-all">sha256: ${esc(r.sha256)}</div>` : `<span class="mono" style="color:var(--red)">${esc(r.error || "failed")}</span>`;
+}
+async function doMultiHash() {
+  const p = document.getElementById("hash-path").value.trim();
+  const out = document.getElementById("hash-result");
+  if (!p) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  out.innerHTML = '<span class="mono">computing hardware-accelerated multi-hash...</span>';
+  const r = await api("/api/multihash?path=" + encodeURIComponent(p));
+  if (r && !r.error && r.sha256) {
+    out.innerHTML = `
+      <table class="data" style="max-width:700px">
+        <thead><tr><th>Algorithm</th><th>Digest</th></tr></thead>
+        <tbody>
+          <tr><td><b>MD5</b></td><td class="mono">${esc(r.md5)}</td></tr>
+          <tr><td><b>SHA-256</b></td><td class="mono">${esc(r.sha256)}</td></tr>
+          <tr><td><b>SHA-512</b></td><td class="mono" style="word-break:break-all">${esc(r.sha512)}</td></tr>
+          <tr><td><b>Engine</b></td><td><span class="status-pill green">osleuth_core C++ (Hardware Accelerated Single-Pass)</span></td></tr>
+        </tbody>
+      </table>`;
+  } else {
+    out.innerHTML = `<span class="mono" style="color:var(--red)">${esc((r && r.error) || "computation failed (file must be under ~/cases)")}</span>`;
+  }
 }
 async function loadSqlTables() {
   const f = document.getElementById("sql-file").value;
@@ -638,23 +856,26 @@ async function genReport() {
 function pageReports() {
   const dest = ACTIVE_CASE?.destination || "";
   return `
-    <div class="page-title">Reports</div><div class="page-sub">Generate professional case reports and exports.</div>
+    <div class="page-title">Reports & Evidentiary Certification</div>
+    <div class="page-sub">Generate professional case reports, CASE/UCO cyber-investigation ontologies, and triple-hash certificates.</div>
     <div class="panel-card"><div class="panel-card-head">New Report</div>
       <div class="form-grid">
         <div class="form-field"><span class="form-label">Report Title</span><input class="form-input" value="${ACTIVE_CASE ? esc(ACTIVE_CASE.case_id) + " — Case Report" : "Case Report"}"></div>
         <div class="form-field"><span class="form-label">Examiner</span><input class="form-input" value="${esc(ACTIVE_CASE?.examiner || "")}"></div>
-        <div class="form-field"><span class="form-label">Sections</span><select class="form-select"><option>Full evidence summary</option><option>Messages only</option><option>Calls only</option></select></div>
-        <div class="form-field"><span class="form-label">Format</span><select class="form-select"><option>HTML</option><option>CSV bundle</option><option>PDF (browser print)</option></select></div>
+        <div class="form-field"><span class="form-label">Sections</span><select class="form-select"><option>Full evidence summary</option><option>Messages only</option><option>Calls only</option><option>Location & Telemetry only</option></select></div>
+        <div class="form-field"><span class="form-label">Format</span><select class="form-select"><option>HTML + CASE/UCO JSON-LD</option><option>HTML Only</option><option>CSV bundle</option><option>PDF (browser print)</option></select></div>
         <div class="form-field full"><span class="form-label">Examiner Notes</span><textarea class="form-textarea" placeholder="Summary of findings...">${esc(ACTIVE_CASE?.notes || "")}</textarea></div>
       </div>
       <div style="padding:0 13px 13px"><button class="btn primary" onclick="genReport()">Generate Report</button> <span id="rep-status" class="mono"></span></div>
     </div>
-    <div class="panel-card"><div class="panel-card-head">Existing Reports & Exports</div>
-      <table class="data"><thead><tr><th>Report</th><th>Format</th><th></th></tr></thead>
+    <div class="panel-card"><div class="panel-card-head">Existing Reports, Ontologies & Integrity Certifications</div>
+      <table class="data"><thead><tr><th>Document</th><th>Format</th><th>Description</th><th>Action</th></tr></thead>
       <tbody>${ACTIVE_CASE ? `
-        <tr><td>${esc(ACTIVE_CASE.case_id)} — report.html</td><td>HTML</td><td><button class="btn" onclick="window.open('/api/file?path=${encodeURIComponent(dest + "/report/report.html")}')">Open</button></td></tr>
-        <tr><td>${esc(ACTIVE_CASE.case_id)} — evidence export</td><td>tar.gz</td><td><button class="btn" onclick="exportCase()">Download</button></td></tr>`
-        : `<tr><td colspan="3" class="empty-state">Open a case to see its reports.</td></tr>`}</tbody></table>
+        <tr><td><b>${esc(ACTIVE_CASE.case_id)} — report.html</b></td><td><span class="status-pill green">HTML</span></td><td>Standard examiner forensic report with charts and artifacts</td><td><button class="btn" onclick="window.open('/api/file?path=${encodeURIComponent(dest + "/report/report.html")}')">Open HTML</button></td></tr>
+        <tr><td><b>${esc(ACTIVE_CASE.case_id)} — case_uco.jsonld</b></td><td><span class="status-pill purple">CASE / UCO JSON-LD</span></td><td>Cyber-investigation Analysis Standard Expression (CASE / UCO 1.3.0)</td><td><button class="btn" onclick="window.open('/api/uco?case=${encodeURIComponent(ACTIVE_CASE.case_id)}')">View UCO</button></td></tr>
+        <tr><td><b>${esc(ACTIVE_CASE.case_id)} — certification.json</b></td><td><span class="status-pill blue">Triple-Hash Seal</span></td><td>MD5, SHA-256, SHA-512 manifest and examiner attestation</td><td><button class="btn" onclick="window.open('/api/file?path=${encodeURIComponent(dest + "/certification.json")}')">View Certificate</button></td></tr>
+        <tr><td><b>${esc(ACTIVE_CASE.case_id)} — evidence export</b></td><td><span class="status-pill amber">tar.gz</span></td><td>Cryptographically hashed evidence archive</td><td><button class="btn" onclick="exportCase()">Download</button></td></tr>`
+        : `<tr><td colspan="4" class="empty-state">No active case selected. Reports generate as <span class="mono">report.html</span>, <span class="mono">case_uco.jsonld</span>, and <span class="mono">certification.json</span>.</td></tr>`}</tbody></table>
     </div>`;
 }
 async function exportCase() {
@@ -732,30 +953,108 @@ async function toggleNotifs() {
   setTimeout(() => { if (document.getElementById("notif-panel")) p.remove(); }, 8000);
 }
 
-/* ---------------- render ---------------- */
+/* ---------------- exploit state & evaluation ---------------- */
+let EXPLOIT_FILTER_CHIP = "";
+let EXPLOIT_FILTER_IOS = "";
+let EXPLOIT_FILTER_LAYER = "";
+let EXPLOIT_FILTER_NOHW = false;
 let EXPLOITS_DATA = null;
+let ROUTE_DETAILS_EXPANDED = {};
+
+function toggleRouteDetails(idx) {
+  ROUTE_DETAILS_EXPANDED[idx] = !ROUTE_DETAILS_EXPANDED[idx];
+  const row = document.getElementById(`route-detail-${idx}`);
+  if (row) {
+    row.style.display = ROUTE_DETAILS_EXPANDED[idx] ? "table-row" : "none";
+  }
+}
+
+async function evalExploitsTarget() {
+  const c = document.getElementById("target-chip")?.value || "";
+  const v = document.getElementById("target-ios")?.value.trim() || "";
+  const l = document.getElementById("target-layer")?.value || "";
+  const n = document.getElementById("target-nohw")?.checked || false;
+  EXPLOIT_FILTER_CHIP = c;
+  EXPLOIT_FILTER_IOS = v;
+  EXPLOIT_FILTER_LAYER = l;
+  EXPLOIT_FILTER_NOHW = n;
+  await render();
+}
+
+async function resetExploitsTarget() {
+  EXPLOIT_FILTER_CHIP = DEVICE?.chip || "";
+  EXPLOIT_FILTER_IOS = DEVICE?.ios || "";
+  EXPLOIT_FILTER_LAYER = "";
+  EXPLOIT_FILTER_NOHW = false;
+  await render();
+}
+
 async function pageExploits() {
-  let qp = "";
-  if (DEVICE) qp = "?chip=" + encodeURIComponent(DEVICE.chip || "") + "&ios=" + encodeURIComponent(DEVICE.ios || "");
+  if (!EXPLOIT_FILTER_CHIP && DEVICE?.chip) EXPLOIT_FILTER_CHIP = DEVICE.chip;
+  if (!EXPLOIT_FILTER_IOS && DEVICE?.ios) EXPLOIT_FILTER_IOS = DEVICE.ios;
+
+  const params = [];
+  if (EXPLOIT_FILTER_CHIP) params.push("chip=" + encodeURIComponent(EXPLOIT_FILTER_CHIP));
+  if (EXPLOIT_FILTER_IOS) params.push("ios=" + encodeURIComponent(EXPLOIT_FILTER_IOS));
+  if (EXPLOIT_FILTER_LAYER) params.push("layer=" + encodeURIComponent(EXPLOIT_FILTER_LAYER));
+  if (EXPLOIT_FILTER_NOHW) params.push("no_hardware=1");
+  const qp = params.length ? "?" + params.join("&") : "";
+
   try {
     const d = await api("/api/exploits" + qp);
     if (d && d.routes) EXPLOITS_DATA = d;
   } catch { EXPLOITS_DATA = null; }
+
   const d = EXPLOITS_DATA;
   const routes = d ? d.routes : [];
   const discs = d ? d.disclosures : [];
   const expo = d && d.exposure ? d.exposure : [];
   const rec = d && d.recommendation ? d.recommendation : [];
-  const st = DEVICE ? ` · ${DEVICE.chip || "?"} / ${DEVICE.ios || "?"}` : "";
-  const routeRows = routes.map(r => `
-    <tr>
-      <td class="mono">${esc(r.name)}</td>
-      <td><span class="status-pill ${r.hardware === "none" ? "green" : r.hardware === "rig" ? "red" : "amber"}">${esc(r.hardware)}</span></td>
-      <td>${esc(r.layer)}</td>
-      <td class="mono">${esc(r.year)}</td>
-      <td>${esc(String(r.ios || "").slice(0, 42))}</td>
-      <td>${esc(String(r.bfu || "").slice(0, 46))}</td>
-    </tr>`).join("");
+  const targetLabel = (EXPLOIT_FILTER_CHIP || EXPLOIT_FILTER_IOS)
+    ? ` · Target: ${EXPLOIT_FILTER_CHIP || "Any"} / ${EXPLOIT_FILTER_IOS || "Any"}`
+    : (DEVICE ? ` · Attached: ${DEVICE.chip || "?"} / ${DEVICE.ios || "?"}` : "");
+
+  const chipsList = ["", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15", "A16", "A17", "M1", "M2", "M3", "M4"];
+  const layersList = ["", "bootrom", "sep", "kernel", "userspace", "trollstore", "pac/ppl"];
+
+  const routeRows = routes.map((r, idx) => {
+    const isExp = ROUTE_DETAILS_EXPANDED[idx];
+    const chipsStr = (r.chips || []).join(", ") || "ANY";
+    const toolsStr = (r.tooling || []).map(t => `<span class="status-pill gray" style="font-size:9.5px;padding:1px 5px">${esc(t)}</span>`).join(" ");
+    const statePill = r.state ? `<span class="status-pill ${r.state.includes('DFU') ? 'purple' : 'cyan'}" style="font-size:9.5px">${esc(r.state)}</span>` : "—";
+    return `
+      <tr>
+        <td class="mono"><b>${esc(r.name)}</b></td>
+        <td><span class="status-pill ${r.hardware === "none" ? "green" : r.hardware === "rig" ? "red" : "amber"}">${esc(r.hardware)}</span></td>
+        <td>${esc(r.layer)}</td>
+        <td class="mono">${esc(r.year)}</td>
+        <td class="mono" style="font-size:11px">${esc(chipsStr)}</td>
+        <td>${esc(String(r.ios || "").slice(0, 36))}</td>
+        <td>${statePill}</td>
+        <td>${toolsStr || "—"}</td>
+        <td>${esc(String(r.bfu || "").slice(0, 36))}</td>
+        <td><button class="btn" style="padding:2px 8px;font-size:11px" onclick="toggleRouteDetails(${idx})">${isExp ? "Hide" : "Details"}</button></td>
+      </tr>
+      <tr id="route-detail-${idx}" style="display:${isExp ? "table-row" : "none"};background:#14171d">
+        <td colspan="10" style="padding:12px 14px;border-bottom:1px solid var(--border2)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:11.5px">
+            <div>
+              <div style="color:var(--muted);font-weight:600;margin-bottom:4px">EXPLOIT OVERVIEW & TECHNICAL NOTES</div>
+              <div style="line-height:1.5">${esc(r.notes || "No additional technical notes.")}</div>
+              <div style="margin-top:6px;color:var(--faint)">Layer: <b>${esc(r.layer)}</b> · Year: <b>${esc(r.year)}</b> · BFU Impact: <b>${esc(r.bfu || "None")}</b></div>
+            </div>
+            <div>
+              <div style="color:var(--muted);font-weight:600;margin-bottom:4px">EXECUTION PREREQUISITES & TOOLING</div>
+              <div>Supported Silicon: <span class="mono">${esc(chipsStr)}</span></div>
+              <div>Required State: <span class="mono">${esc(r.state || "AFU / Userland")}</span></div>
+              <div>Hardware Rig: <span class="mono">${esc(r.hardware === "none" ? "Plain PC + USB Cable" : r.hardware === "rig" ? "RP2350 Hardware Rig Required (usbliter8)" : "App Sideload / No extra HW")}</span></div>
+              <div style="margin-top:4px">Execution Binaries: ${toolsStr || "Native"}</div>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+  }).join("");
+
   const discRows = discs.map(x => {
     const k = String(x.kind || "");
     const high = /keychain|root|kernel.?exec|kernel.?write|kernel privilege|arbitrary code|bypass/i.test(k + " " + String(x.impact || ""));
@@ -771,9 +1070,11 @@ async function pageExploits() {
       <td>${esc(String(x.impact || "").slice(0, 66))}</td>
     </tr>`;
   }).join("");
+
   const expoRows = expo.map(x => `
-    <tr><td class="mono">${esc(x.name || x.cve || "")}</td><td>${esc(x.match || x.kind || "")}</td>
+    <tr><td class="mono"><b>${esc(x.name || x.cve || "")}</b></td><td>${esc(x.match || x.kind || "")}</td>
         <td>${esc(x.hardware || x.component || "")}</td></tr>`).join("");
+
   const verRows = (() => {
     const rows = [];
     for (const v of ["26.0", "26.0.1", "26.1", "26.6", "26.6.1", "27.0"]) {
@@ -784,23 +1085,54 @@ async function pageExploits() {
     }
     return rows.join("");
   })();
+
   return `
-    <div class="page-title">Public Exploit Catalog${st}</div>
-    <div class="page-sub">Verified public iOS exploit routes and recent acquisition-relevant disclosures. All entries are public research.</div>
-    ${rec.length ? `<div class="panel-card"><div class="panel-card-head">Recommended for this device</div>
-      ${rec.map(s => `<div class="log-event"><span class="dot green"></span><div class="log-body"><div class="log-text">${esc(s.slice(0, 110))}</div></div></div>`).join("")}</div>` : ""}
-    ${expo.length ? `<div class="panel-card"><div class="panel-card-head">Exposure report (${DEVICE ? DEVICE.chip + " / " + DEVICE.ios : "target"})</div>
-      <table class="data"><thead><tr><th>Route / CVE</th><th>Window</th><th>HW / Component</th></tr></thead><tbody>${expoRows}</tbody></table></div>` : ""}
+    <div class="page-title">Public Exploit Catalog & Silicon Exposure Matrix${esc(targetLabel)}</div>
+    <div class="page-sub">Verified public iOS exploit routes, jailbreak vectors, and recent acquisition disclosures. 100% lawful, defensive research catalog.</div>
+
+    <!-- Target Evaluation Card -->
+    <div class="panel-card">
+      <div class="panel-card-head">Target Device & Silicon Evaluator</div>
+      <div class="filter-bar" style="flex-wrap:wrap;gap:8px;padding:10px 13px">
+        <span class="mono" style="color:var(--muted)">Target Chip:</span>
+        <select class="form-select" id="target-chip" style="width:130px">
+          ${chipsList.map(c => `<option value="${c}" ${EXPLOIT_FILTER_CHIP === c ? "selected" : ""}>${c ? c : "All Chips"}</option>`).join("")}
+        </select>
+        <span class="mono" style="color:var(--muted);margin-left:8px">Target iOS:</span>
+        <input class="form-input" id="target-ios" placeholder="e.g. 16.5" style="width:110px" value="${esc(EXPLOIT_FILTER_IOS)}">
+        <span class="mono" style="color:var(--muted);margin-left:8px">Layer:</span>
+        <select class="form-select" id="target-layer" style="width:130px">
+          ${layersList.map(l => `<option value="${l}" ${EXPLOIT_FILTER_LAYER === l ? "selected" : ""}>${l ? l : "All Layers"}</option>`).join("")}
+        </select>
+        <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer;margin-left:8px">
+          <input type="checkbox" id="target-nohw" ${EXPLOIT_FILTER_NOHW ? "checked" : ""}> Plain PC+USB Only
+        </label>
+        <button class="btn primary" onclick="evalExploitsTarget()">Evaluate Target</button>
+        <button class="btn" onclick="resetExploitsTarget()">Reset</button>
+      </div>
+    </div>
+
+    ${rec.length ? `<div class="panel-card"><div class="panel-card-head">Recommended Acquisition Vectors for ${esc(EXPLOIT_FILTER_CHIP || DEVICE?.chip || "Target")}</div>
+      ${rec.map(s => `<div class="log-event"><span class="dot green"></span><div class="log-body"><div class="log-text">${esc(s.slice(0, 140))}</div></div></div>`).join("")}</div>` : ""}
+
+    ${expo.length ? `<div class="panel-card"><div class="panel-card-head">Exposure Assessment (${esc(EXPLOIT_FILTER_CHIP || "Target")} / ${esc(EXPLOIT_FILTER_IOS || "Any")})</div>
+      <table class="data"><thead><tr><th>Route / CVE</th><th>Exposure Window</th><th>Hardware / Component</th></tr></thead><tbody>${expoRows}</tbody></table></div>` : ""}
+
     <div class="panel-card">
       <div class="panel-card-head">Firmware status (26.x-27.x)</div>
       <table class="data"><thead><tr><th>iOS</th><th>Public route</th></tr></thead><tbody>${verRows}</tbody></table>
     </div>
+
     <div class="panel-card">
-      <div class="panel-card-head">Routes (${routes.length} public)</div>
-      <div class="filter-bar"><input class="form-input" id="exploit-filter" placeholder="Filter routes..." style="width:260px" oninput="filterTable('tp-Exploits', this.value)">
+      <div class="panel-card-head">Routes (${routes.length} cataloged)</div>
+      <div class="filter-bar"><input class="form-input" id="exploit-filter" placeholder="Filter routes (name, tooling, layer)..." style="width:280px" oninput="filterTable('tp-Exploits', this.value)">
         <button class="btn" onclick="location.hash='exploits';refreshAll()">Refresh</button></div>
-      <table class="data" id="tp-Exploits"><thead><tr><th>Name</th><th>HW</th><th>Layer</th><th>Year</th><th>iOS</th><th>BFU</th></tr></thead><tbody>${routeRows || '<tr><td colspan="6">No routes match the current filters.</td></tr>'}</tbody></table>
+      <table class="data" id="tp-Exploits">
+        <thead><tr><th>Name</th><th>HW Rig</th><th>Layer</th><th>Year</th><th>Chips</th><th>iOS Window</th><th>State</th><th>Tooling</th><th>BFU Impact</th><th>Details</th></tr></thead>
+        <tbody>${routeRows || '<tr><td colspan="10">No routes match the current filters.</td></tr>'}</tbody>
+      </table>
     </div>
+
     <div class="panel-card">
       <div class="panel-card-head">Recent disclosures (${discs.length})</div>
       <div class="filter-bar"><input class="form-input" id="disc-filter" placeholder="Filter disclosures (CVE, component, kind)..." style="width:300px" oninput="filterTable('tp-Disclosures', this.value)">
@@ -809,17 +1141,36 @@ async function pageExploits() {
     </div>`;
 }
 
+let DOCTOR_DATA = null;
+
+async function runDoctorCheck() {
+  toast("Running doctor diagnostics...", "blue");
+  try {
+    DOCTOR_DATA = await api("/api/doctor");
+    toast(DOCTOR_DATA.ready ? "Doctor: all systems ready" : `Doctor: ${DOCTOR_DATA.passed}/${DOCTOR_DATA.total} passed`, DOCTOR_DATA.ready ? "green" : "amber");
+  } catch {
+    toast("Doctor diagnostics failed", "red");
+  }
+  render();
+}
+
 async function pageTools() {
+  if (!DOCTOR_DATA) {
+    try { DOCTOR_DATA = await api("/api/doctor"); } catch { DOCTOR_DATA = null; }
+  }
   let tdata = null;
   try { tdata = await api("/api/tools"); } catch { tdata = null; }
   let stance = null;
   try { stance = await api("/api/stance"); } catch { stance = null; }
   let bfu = null;
   try { bfu = await api("/api/bfu?chip=" + encodeURIComponent((DEVICE && DEVICE.chip) || "A13") + "&ios=" + encodeURIComponent((DEVICE && DEVICE.ios) || "")); } catch { bfu = null; }
+
+  const doc = DOCTOR_DATA;
   const tools = (tdata && tdata.tools) || [];
   const sum = (tdata && tdata.summary) || {};
   const installed = tools.filter(t => t.installed).length;
   const cats = ["acquisition", "jailbreak", "restore", "parsing", "analysis"];
+
   const compRows = stance ? stance.rows.map(r => {
     const [cap, ...cells] = r;
     const sm = stance.status_map || {};
@@ -830,13 +1181,40 @@ async function pageTools() {
     };
     return `<tr><td>${esc(cap)}</td>${cells.map(c => `<td>${pill(c)}</td>`).join("")}</tr>`;
   }).join("") : "";
-  return `<div class="page-head"><div class="page-title">Forensic Toolchain</div>
-    <div class="page-sub">Open-source iOS forensic tooling: installed status detected live on this workstation.</div></div>
+
+  const docPill = doc
+    ? `<span class="status-pill ${doc.ready ? "green" : "amber"}">${doc.ready ? "ALL CHECKS PASSED" : `${doc.passed}/${doc.total} PASSED`}</span>`
+    : "";
+
+  return `<div class="page-head"><div class="page-title">Forensic Toolchain & Workstation Diagnostics</div>
+    <div class="page-sub">Open-source iOS forensic tooling and workstation health check detected live on this machine.</div></div>
+
+    <!-- Doctor Diagnostics Panel -->
+    <div class="panel-card">
+      <div class="panel-card-head">
+        Workstation Diagnostics (Doctor) ${docPill}
+        <button class="btn" style="margin-left:auto" onclick="runDoctorCheck()">Re-run Diagnostics</button>
+      </div>
+      ${doc ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 13px">
+          ${(doc.checks || []).map(c => `
+            <div class="log-event" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px">
+              <span class="dot ${c.ok ? "green" : "amber"}"></span>
+              <div class="log-body">
+                <div class="log-text"><b>${esc(c.check)}</b> <span class="mono" style="color:var(--muted);font-size:11px">(${esc(c.detail || (c.ok ? "ok" : "missing"))})</span></div>
+              </div>
+              <span class="status-pill ${c.ok ? "green" : "amber"}">${c.ok ? "pass" : "warn"}</span>
+            </div>`).join("")}
+        </div>` : '<div class="empty-state">Doctor diagnostics not loaded. Click Re-run Diagnostics.</div>'}
+    </div>
+
+    <!-- Toolchain Metrics -->
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
       ${cats.map(c => { const cc = (sum.by_category && sum.by_category[c]) || {installed:0,total:0};
         return `<div class="metric-card"><div class="metric-body"><div class="metric-label">${c}</div>
         <div class="metric-value">${cc.installed}/${cc.total}</div></div></div>`; }).join("")}
     </div>
+
     <div class="panel-card"><div class="panel-card-head">Toolchain (${installed}/${tools.length} installed)</div>
     <div class="filter-bar"><input class="form-input" id="tool-filter" placeholder="Filter tools..." style="width:260px" oninput="filterTable('tp-Tools', this.value)">
       <button class="btn" onclick="location.hash='tools';render()">Refresh</button></div>
@@ -847,6 +1225,7 @@ async function pageTools() {
     </tbody></table>
     <div class="log-event"><span class="dot ${installed ? "green" : "amber"}"></span><div class="log-text">Install the missing chain: <span class="mono">sudo ./install.sh --with-checkm8-tools</span> plus apt/pip per tool. Parsing layer (iLEAPP/MEAT/APOLLO/ArtEx/MVT) is optional per-case.</div></div>
     </div>
+
     ${bfu ? `<!-- BFU panel -->
     <div style="height:14px"></div>
     <div class="panel-card"><div class="panel-card-head">BFU for modern devices (${esc(bfu.playbook.chip)})</div>
@@ -876,8 +1255,9 @@ async function pageTools() {
       <input class="form-input" id="escrow-out" placeholder="out dir" style="width:140px" value="">
       <button class="btn" onclick="runEscrowUnlock()">Unlock backup</button>
     </div>
-    <div id="bfu-results" class="log-event" style="display:none;margin-top:8px"><div class="log-body" id="bfu-results-body2"></div></div>
+    <div id="bfu-results2" class="log-event" style="display:none;margin-top:8px"><div class="log-body" id="bfu-results-body2"></div></div>
     </div>` : ""}
+
     ${stance ? `<!-- honest stance vs commercial platforms -->
     <div style="height:14px"></div>
     <div class="panel-card"><div class="panel-card-head">Honest stance vs commercial platforms</div>
