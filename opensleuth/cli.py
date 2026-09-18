@@ -893,6 +893,37 @@ def cmd_exposure(args):
     print(render_exposure(chip, ios, detailed=bool(getattr(args, "detailed", False))))
 
 
+def cmd_autoexploit(args):
+    """AXIOM/Cellebrite-style auto-exploiter: probe the attached device, then
+    automatically run every applicable PUBLIC exploit route in priority order
+    (bootrom -> SEP -> AFU kernel -> logical) until one succeeds.
+
+    Tries each route with the real tooling (gaster/irecovery/palera1n/
+    usbliter8ctl/pymobiledevice3) and stops the moment any one gains a path.
+    Non-destructive by default; pass --allow-destructive for A10/A11 checkm8
+    on iOS-16+ locked devices (the documented passcode-bypass caveat).
+    """
+    from .exploitrunner import auto_exploit, render_run
+
+    def _log(msg: str) -> None:
+        print(msg, flush=True)
+
+    try:
+        report = auto_exploit(
+            allow_destructive=bool(getattr(args, "allow_destructive", False)),
+            route_timeout=getattr(args, "timeout", 300),
+            log=_log,
+        )
+    except RuntimeError as exc:
+        sys.exit(str(exc))
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "autoexploit.json").write_text(
+        json.dumps(render_run(report, to_json=True), indent=2), encoding="utf-8")
+    print(render_run(report))
+    print(f"\nreport written to {out / 'autoexploit.json'}")
+
+
 def cmd_versions(args):
     """Authoritative public jailbreak status per firmware version."""
     from .versions import render_26, render_27, render_all
@@ -2000,6 +2031,12 @@ def main(argv=None):
     expo.add_argument("--ios", default="", help="iOS version (e.g. 26.6.1); auto-detected if omitted")
     expo.add_argument("--detailed", action="store_true", help="include BFU positions")
     expo.set_defaults(fn=cmd_exposure)
+    ae = sub.add_parser("autoexploit", help="AXIOM/Cellebrite-style auto-exploiter: probe then run every applicable public route until one succeeds")
+    ae.add_argument("--out", default="autoexploit", help="output dir for autoexploit.json")
+    ae.add_argument("--allow-destructive", action="store_true",
+                    help="allow A10/A11 checkm8 on iOS-16+ locked devices (documented passcode-bypass caveat)")
+    ae.add_argument("--timeout", type=int, default=300, help="per-route subprocess timeout (seconds)")
+    ae.set_defaults(fn=cmd_autoexploit)
     ver = sub.add_parser("versions", help="authoritative per-firmware public jailbreak status (iOS 18/26/27, tvOS, bridgeOS)")
     ver.add_argument("ios", nargs="?", default="", help="specific version, e.g. 26.0.1")
     ver.add_argument("--ipados", action="store_true", help="show the iPadOS 26 table")

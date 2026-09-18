@@ -382,6 +382,18 @@ class DesktopShellTest(unittest.TestCase):
         self.assertIn("Target Chip", html)
         self.assertIn("Plain PC+USB", html)
 
+    def test_exploits_page_has_autoexploiter_panel(self):
+        self.win.view.page().runJavaScript("location.hash = 'exploits'")
+        self.assertTrue(
+            self._wait_for("document.getElementById('page') ? "
+                           "document.getElementById('page').innerHTML : ''",
+                           "Auto-Exploiter"),
+            "auto-exploiter panel did not render on exploits page")
+        html = self._page_html()
+        self.assertIn("Auto-Exploiter", html)
+        self.assertIn("probe", html)
+        self.assertIn("ae-pane", html)
+
     def test_chats_page_renders_in_browser(self):
         self.win.view.page().runJavaScript("location.hash = 'chats'")
         self.assertTrue(

@@ -35,10 +35,35 @@ git clone https://github.com/xanstomper/coreprobe && cd coreprobe
 sudo ./install.sh --with-web-service      # + --with-cxx --with-checkm8-tools --with-desktop
 opensleuth doctor                          # workstation readiness check
 opensleuth exposure --chip A13 --ios 26.6.1
+opensleuth autoexploit                     # AXIOM-style: probe then run every applicable
+                                           # public route until one succeeds (see below)
 ```
 
 **Desktop app:** `opensleuth-desktop` (Ctrl+1-9 pages, live device status)
 **Web studio:** `opensleuth-web` → http://127.0.0.1:9121 (Research · BFU Lab · Evidence · Artifacts · Exploits · Tools)
+
+## Auto-Exploiter
+
+One command that behaves like Cellebrite/AXIOM's "auto" flow: it probes the
+attached device (chip / iOS / BFU·AFU·DFU·recovery state), builds an ordered
+plan of the **public** routes that actually apply, and runs each one through
+the real tooling until **one succeeds** — then stops.
+
+```bash
+opensleuth autoexploit              # detect + try checkm8 → SEP → AFU → logical
+opensleuth autoexploit --allow-destructive   # allow A10/A11 checkm8 on iOS 16+ (passcode-off caveat)
+```
+
+It is available on the **Exploits** page in both the desktop app and web studio
+(the "Auto-Exploiter" panel with a start button and live per-route status).
+
+Ordering (bootrom first, strongest primitive): checkm8 (A7-A11) / usbliter8
+(A12-A13) → PongoOS/ramdisk chain → Blackbird SEP (A10/T2) → AFU kernel
+jailbreaks (Dopamine, Serotonin, …) → logical + backup. Routes are never
+falsely reported as working: a route only counts as a hit when an objective
+state change is observed (PWND marker in USB serial, irecovery env reachable,
+AFC2/SSH mount, or a reachable logical service). Missing tooling is reported
+per-route so it can be installed and the run repeated.
 
 ## What it can do right now
 
@@ -53,6 +78,7 @@ opensleuth exposure --chip A13 --ios 26.6.1
 | Artifact parsing: SMS/calls/notes/Safari/crash/wireless/knowledgeC/sysdiagnose | ✅ full |
 | Super-timeline (pattern of life) | ✅ full |
 | iLEAPP bridge (100+ parsers) | ✅ integration |
+| Auto-Exploiter (detect → run routes → stop on hit) | ✅ full, UI + CLI |
 | Court chain of custody (certify/verify) | ✅ full |
 | Exploit-dev toolbox (IMG4/IPSW/trustcache/patch catalog) | ✅ full |
 | DFU research: capture → trace → corpus → fuzz → campaign | ✅ full |

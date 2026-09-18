@@ -242,6 +242,45 @@ def _safe_case_file(path_str):
 
 RCONS = {"total": 0, "done": 0, "failed": 0, "running": False}
 
+# Auto-exploiter run state (single active run at a time)
+AEXPLOIT = {
+    "running": False,
+    "report": None,
+    "error": None,
+    "log": [],
+    "finished_at": None,
+    "allow_destructive": False,
+}
+
+
+def _aexploit_log(msg):
+    AEXPLOIT["log"].append(f"{datetime.now().strftime('%H:%M:%S')} {msg}")
+    if len(AEXPLOIT["log"]) > 400:
+        AEXPLOIT["log"] = AEXPLOIT["log"][-400:]
+
+
+def _run_autoexploit(allow_destructive=False):
+    """Background worker: probe + plan + run the auto-exploiter."""
+    from ..exploitrunner import auto_exploit, render_run
+
+    AEXPLOIT["running"] = True
+    AEXPLOIT["error"] = None
+    AEXPLOIT["log"] = []
+    sz = AEXPLOIT  # noqa: F841  (aliasing keeps closure reads stable)
+    try:
+        report = auto_exploit(
+            allow_destructive=allow_destructive,
+            route_timeout=280,
+            log=_aexploit_log,
+        )
+        AEXPLOIT["report"] = render_run(report, to_json=True)
+    except Exception as exc:  # noqa: BLE001
+        AEXPLOIT["error"] = str(exc)
+        _aexploit_log(f"auto-exploit aborted: {exc}")
+    finally:
+        AEXPLOIT["finished_at"] = datetime.now().isoformat()
+        AEXPLOIT["running"] = False
+
 
 def _icon(bundle):
     cache = Path.home() / ".cache" / "opensleuth-icons"
@@ -458,6 +497,14 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     payload["recommendation"] = []
             self._send(200, json.dumps(payload, default=str))
+        elif path == "/api/autoexploit":
+            self._send(200, json.dumps({
+                "running": AEXPLOIT["running"],
+                "error": AEXPLOIT["error"],
+                "report": AEXPLOIT["report"],
+                "log": AEXPLOIT["log"],
+                "finished_at": AEXPLOIT["finished_at"],
+            }, default=str))
         elif path == "/api/tools":
             from .. import forensics
             self._send(200, json.dumps({
@@ -787,6 +834,15 @@ class Handler(BaseHTTPRequestHandler):
             # kick off actual acquisition in a background thread
             threading.Thread(target=self._do_acquire, args=(data,), daemon=True).start()
             self._send(200, json.dumps({"started": True, "destination": str(dest)}))
+        elif parsed.path == "/api/autoexploit":
+            if AEXPLOIT["running"]:
+                self._send(200, json.dumps({"started": False, "busy": True}))
+                return
+            allow_destruct = bool(data.get("allow_destructive"))
+            AEXPLOIT["allow_destructive"] = allow_destruct
+            threading.Thread(target=_run_autoexploit,
+                             args=(allow_destruct,), daemon=True).start()
+            self._send(200, json.dumps({"started": True, "allow_destructive": allow_destruct}))
         elif parsed.path == "/api/hash":
             self._send(200, json.dumps(_sha256(data.get("path", ""))))
         elif parsed.path == "/api/report":

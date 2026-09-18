@@ -989,6 +989,86 @@ async function resetExploitsTarget() {
   await render();
 }
 
+/* ---------------- auto-exploiter (AXIOM/Cellebrite-style) ---------------- */
+let AEXPLOIT = null;          // {running, report, error, log, finished_at}
+
+async function refreshAutoExploit() {
+  try { AEXPLOIT = await api("/api/autoexploit"); }
+  catch { AEXPLOIT = null; }
+  return AEXPLOIT;
+}
+
+async function startAutoExploit() {
+  const allowD = document.getElementById("ae-destructive")?.checked || false;
+  toast("Auto-exploiter running: probing + trying routes...", "blue");
+  try {
+    const r = await api("/api/autoexploit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allow_destructive: allowD }),
+    });
+    if (r.busy) { toast("Auto-exploiter already running", "amber"); }
+    else if (r.started) { toast("Auto-exploiter started", "green"); }
+    else { toast("Auto-exploiter failed to start", "red"); }
+  } catch { toast("Auto-exploiter request failed", "red"); }
+  await render();
+}
+
+async function pollAutoExploit() {
+  const st = await refreshAutoExploit();
+  if (st && st.running) {
+    // refresh the results pane in place every 1.5s while running
+    const pane = document.getElementById("ae-pane");
+    if (pane) pane.innerHTML = await renderAutoExploitPane(st);
+    setTimeout(pollAutoExploit, 1500);
+  } else if (st && st.report) {
+    toast(st.report.winner ? `Route succeeded: ${st.report.winner}` : "No route succeeded this run", st.report.winner ? "green" : "amber");
+  }
+}
+
+async function renderAutoExploitPane(st) {
+  if (!st) { await refreshAutoExploit(); st = AEXPLOIT; }
+  if (!st) return `<div class="empty-state">Auto-exploiter state unavailable.</div>`;
+  const rep = st.report;
+  const dev = rep && rep.target ? rep.target : null;
+  const lines = st.log && st.log.length ? st.log.map(l => `<div class="log-line">${esc(l)}</div>`).join("") : "";
+  const results = rep && rep.results && rep.results.length
+    ? `<table class="data"><thead><tr><th>Route</th><th>Status</th><th>Detail</th></tr></thead><tbody>
+       ${rep.results.map(r => {
+         const mark = r.status === "succeeded" ? "✓" : r.status === "failed" ? "✗" : r.status === "skipped" ? "–" : "…";
+         const color = r.status === "succeeded" ? "green" : r.status === "failed" ? "red" : r.status === "skipped" ? "" : "amber";
+         return `<tr><td class="mono"><b>${esc(r.name)}</b></td><td><span class="status-pill ${color}">${mark} ${esc(r.status)}</span></td><td style="font-size:11px">${esc(r.detail)}</td></tr>`;
+       }).join("")}</tbody></table>`
+    : `<div class="empty-state">No routes attempted yet.</div>`;
+
+  const banner = st.running
+    ? `<div class="log-event"><span class="dot amber"></span><div class="log-body"><div class="log-text"><b>Running…</b> probing device and trying applicable public routes in priority order (bootrom → SEP → AFU → logical).</div></div></div>`
+    : rep && rep.winner
+      ? `<div class="log-event"><span class="dot green"></span><div class="log-body"><div class="log-text"><b>Route succeeded:</b> ${esc(rep.winner)}</div></div></div>`
+      : st.error
+        ? `<div class="log-event"><span class="dot red"></span><div class="log-body"><div class="log-text">${esc(st.error)}</div></div></div>`
+        : `<div class="log-event"><span class="dot"></span><div class="log-body"><div class="log-text">Ready. Start the auto-exploiter to probe the attached device and try every applicable route until one succeeds.</div></div></div>`;
+
+  return `
+    <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      ${st.running ? `<span class="status-pill amber">● RUNNING</span>` : (rep && rep.winner) ? `<span class="status-pill green">SUCCESS</span>` : `<span class="status-pill">IDLE</span>`}
+      <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer">
+        <input type="checkbox" id="ae-destructive"> Allow destructive (A10/A11 checkm8 on iOS 16+)
+      </label>
+      <button class="btn primary" style="margin-left:auto" onclick="startAutoExploit()" ${st.running ? "disabled" : ""}>${st.running ? "Running…" : "▶ Auto-Exploit Device"}</button>
+      ${st.running ? `<button class="btn" onclick="setTimeout(pollAutoExploit,1200)">Refresh</button>` : ""}
+    </div>
+    ${banner}
+    ${dev ? `<div style="padding:6px 14px;border-top:1px solid var(--border2);display:flex;flex-wrap:wrap;gap:16px;font-size:11.5px">
+        <span class="mono" style="color:var(--muted)">device <b>${esc(dev.model || "?")}</b></span>
+        <span class="mono" style="color:var(--muted)">chip <b>${esc(dev.chip || "?")}</b></span>
+        <span class="mono" style="color:var(--muted)">iOS <b>${esc(dev.ios || "?")}</b></span>
+        <span class="mono" style="color:var(--muted)">state <b>${esc(dev.state || "?")}</b>${dev.pwnd ? ` (PWND: ${esc(dev.pwnd)})` : ""}</span>
+      </div>` : ""}
+    <div style="padding:10px 14px;border-top:1px solid var(--border2)">${results}</div>
+    ${lines ? `<div style="padding:10px 14px;border-top:1px solid var(--border2);max-height:180px;overflow:auto;font-family:var(--mono);font-size:11px;color:var(--faint);background:#0b0d10">${lines}</div>` : ""}`;
+}
+
 async function pageExploits() {
   if (!EXPLOIT_FILTER_CHIP && DEVICE?.chip) EXPLOIT_FILTER_CHIP = DEVICE.chip;
   if (!EXPLOIT_FILTER_IOS && DEVICE?.ios) EXPLOIT_FILTER_IOS = DEVICE.ios;
@@ -1013,6 +1093,9 @@ async function pageExploits() {
   const targetLabel = (EXPLOIT_FILTER_CHIP || EXPLOIT_FILTER_IOS)
     ? ` · Target: ${EXPLOIT_FILTER_CHIP || "Any"} / ${EXPLOIT_FILTER_IOS || "Any"}`
     : (DEVICE ? ` · Attached: ${DEVICE.chip || "?"} / ${DEVICE.ios || "?"}` : "");
+
+  await refreshAutoExploit();
+  const aePane = await renderAutoExploitPane(AEXPLOIT);
 
   const chipsList = ["", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15", "A16", "A17", "M1", "M2", "M3", "M4"];
   const layersList = ["", "bootrom", "sep", "kernel", "userspace", "trollstore", "pac/ppl"];
@@ -1089,6 +1172,15 @@ async function pageExploits() {
   return `
     <div class="page-title">Public Exploit Catalog & Silicon Exposure Matrix${esc(targetLabel)}</div>
     <div class="page-sub">Verified public iOS exploit routes, jailbreak vectors, and recent acquisition disclosures. 100% lawful, defensive research catalog.</div>
+
+    <!-- Auto-Exploiter (Cellebrite/AXIOM style) -->
+    <div class="panel-card">
+      <div class="panel-card-head">
+        Auto-Exploiter
+        <span class="status-pill" style="margin-left:6px;font-weight:400">probe → run routes → stop on hit</span>
+      </div>
+      <div id="ae-pane">${aePane}</div>
+    </div>
 
     <!-- Target Evaluation Card -->
     <div class="panel-card">

@@ -185,6 +185,7 @@ table.data td.num { font-variant-numeric: tabular-nums; }
 .log-body { flex: 1; min-width: 0; }
 .log-text { font-size: 12px; }
 .log-time { font-size: 10.5px; color: var(--faint); margin-top: 1px; }
+.log-line { padding: 1px 0; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
 /* SECTION GRID */
 .section-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
