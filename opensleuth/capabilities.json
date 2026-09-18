@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "capability_id": "device-info",
+      "name": "Device identification (lockdown/sysfs)",
+      "status": "REGRESSION_TESTED",
+      "category": "acquisition",
+      "research_id": "",
+      "description": "Identify attached device: model, chip, iOS, state via sysfs USB + lockdown enrichment.",
+      "adapter": "opensleuth.usb.usb_state + opensleuth.exploitrunner.probe_target",
+      "adapter_version": "1",
+      "prerequisites": [
+        "device attached"
+      ],
+      "supported_builds": [
+        "any"
+      ],
+      "failed_builds": [],
+      "limitations": [
+        "chip from serial is heuristic when no lockdown"
+      ],
+      "validation_evidence": [
+        {
+          "result": "VALIDATED",
+          "environment": "pytest:tests/test_usb.py",
+          "at": "2026-09-18",
+          "evidence": "synthetic sysfs fixtures"
+        },
+        {
+          "result": "VALIDATED",
+          "environment": "pytest:tests/test_exploitrunner.py",
+          "at": "2026-09-18",
+          "evidence": "probe/plan tests"
+        }
+      ],
+      "last_successful_validation": "2026-09-18",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_usb.py::make_sysfs"
+    },
+    {
+      "capability_id": "logical-backup",
+      "name": "Logical + backup acquisition (AFU, paired)",
+      "status": "REGRESSION_TESTED",
+      "category": "acquisition",
+      "research_id": "",
+      "description": "idevicebackup2/pymobiledevice3 backup + AFC media pull on an unlocked, paired device.",
+      "adapter": "opensleuth.cli:cmd_acquire_backup/media/all",
+      "adapter_version": "1",
+      "prerequisites": [
+        "AFU (after first unlock)",
+        "trusted pairing"
+      ],
+      "supported_builds": [
+        "any iOS with lockdown"
+      ],
+      "failed_builds": [],
+      "limitations": [
+        "keychain needs encrypted backup + password"
+      ],
+      "validation_evidence": [
+        {
+          "result": "VALIDATED",
+          "environment": "pytest:tests/test_e2e_workflow.py",
+          "at": "2026-09-18",
+          "evidence": "E2E acquisition workflow test"
+        }
+      ],
+      "last_successful_validation": "2026-09-18",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_e2e_workflow.py"
+    },
+    {
+      "capability_id": "backup-parse",
+      "name": "Backup parsing (Manifest.db + artifacts)",
+      "status": "REGRESSION_TESTED",
+      "category": "acquisition",
+      "research_id": "",
+      "description": "Parse an acquired backup into normalized artifacts.",
+      "adapter": "opensleuth.backup.Backup + opensleuth.artifacts.*",
+      "adapter_version": "1",
+      "prerequisites": [
+        "acquired backup directory"
+      ],
+      "supported_builds": [
+        "any"
+      ],
+      "failed_builds": [],
+      "limitations": [],
+      "validation_evidence": [
+        {
+          "result": "VALIDATED",
+          "environment": "pytest:tests/test_forensic_parsers.py",
+          "at": "2026-09-18",
+          "evidence": "parser fixtures"
+        }
+      ],
+      "last_successful_validation": "2026-09-18",
+      "last_failed_validation": "",
+      "test_fixture": "tests/fixture.py"
+    },
+    {
+      "capability_id": "checkm8-pwn",
+      "name": "checkm8 bootrom pwn (A7-A11, DFU)",
+      "status": "INTEGRATED",
+      "category": "bootrom",
+      "research_id": "checkm8",
+      "description": "gaster/ipwndfu pwn of DFU bootrom; success verified by PWND marker in USB serial.",
+      "adapter": "opensleuth.exploitrunner.exec_checkm8_pwn",
+      "adapter_version": "1",
+      "prerequisites": [
+        "A7-A11",
+        "DFU mode",
+        "gaster installed"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "no recorded hardware validation run yet (validation required)",
+        "A10/A11 on iOS 16+ require passcode-off/erase (destructive caveat)"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": ""
+    },
+    {
+      "capability_id": "usbliter8-verify",
+      "name": "usbliter8 PWND verification (A12/A13)",
+      "status": "DOCUMENTED",
+      "category": "bootrom",
+      "research_id": "usbliter8",
+      "description": "Host-side verification of a usbliter8-pwned device. The exploit itself runs on the RP2350 rig; CoreProbe only confirms the resulting PWND marker.",
+      "adapter": "",
+      "adapter_version": "",
+      "prerequisites": [
+        "RP2350 rig performs the exploit",
+        "A12/A13"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "exploit requires dedicated hardware (RP2350 board)"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": ""
+    },
+    {
+      "capability_id": "afu-jailbreak-detect",
+      "name": "Jailbreak route detection (AFU, app-based)",
+      "status": "DOCUMENTED",
+      "category": "kernel",
+      "research_id": "dopamine-family",
+      "description": "DETECTION ONLY: verifies whether an installed jailbreak/agent exposes AFC2 root. CoreProbe does not execute any jailbreak (Dopamine/Serotonin/etc. must be installed by the examiner).",
+      "adapter": "opensleuth.exploitrunner.exec_afu_jailbreak",
+      "adapter_version": "",
+      "prerequisites": [
+        "AFU",
+        "examiner-installed agent"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "CoreProbe cannot install or run jailbreaks itself"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": ""
+    }
+  ]
+}
