@@ -1,5 +1,5 @@
 // CoreProbe native core — self-contained C++17, zero external deps.
-// SHA-256 / SHA-1 / MBDB parser / traversal detection / benchmarks.
+// SHA-256 / SHA-1 / MD5 / SHA-512 / MultiHash / MBDB parser / benchmarks.
 #pragma once
 
 #include <cstdint>
@@ -43,6 +43,75 @@ private:
     uint8_t digest_[20];
     bool done_ = false;
     void transform(const uint8_t block[64]);
+};
+
+// ------------------------------------------------------------------ md5 --
+class Md5 {
+public:
+    Md5() { reset(); }
+    void reset();
+    void update(const void* data, size_t len);
+    void final(uint8_t out[16]);
+    std::string hex();
+private:
+    uint32_t state_[4];
+    uint8_t block_[64];
+    size_t block_len_ = 0;
+    uint64_t total_ = 0;
+    uint8_t digest_[16];
+    bool done_ = false;
+    void transform(const uint8_t block[64]);
+};
+
+// ---------------------------------------------------------------- sha512 --
+class Sha512 {
+public:
+    Sha512() { reset(); }
+    void reset();
+    void update(const void* data, size_t len);
+    void final(uint8_t out[64]);
+    std::string hex();
+private:
+    uint64_t h_[8];
+    uint8_t block_[128];
+    size_t block_len_ = 0;
+    uint64_t total_ = 0;
+    uint8_t digest_[64];
+    bool done_ = false;
+    void transform(const uint8_t block[128]);
+};
+
+// ------------------------------------------------------------- multihash --
+struct MultiHashResult {
+    std::string md5;
+    std::string sha1;
+    std::string sha256;
+    std::string sha512;
+};
+
+class MultiHash {
+public:
+    MultiHash() { reset(); }
+    void reset() {
+        md5_.reset();
+        sha1_.reset();
+        sha256_.reset();
+        sha512_.reset();
+    }
+    void update(const void* data, size_t len) {
+        md5_.update(data, len);
+        sha1_.update(data, len);
+        sha256_.update(data, len);
+        sha512_.update(data, len);
+    }
+    MultiHashResult final() {
+        return {md5_.hex(), sha1_.hex(), sha256_.hex(), sha512_.hex()};
+    }
+private:
+    Md5 md5_;
+    Sha1 sha1_;
+    Sha256 sha256_;
+    Sha512 sha512_;
 };
 
 // ---------------------------------------------------------------- mbdb --
@@ -91,5 +160,8 @@ bool parse_mbdb(const uint8_t* data, size_t len, MbdbFile& out, std::string& err
 std::string hex_encode(const uint8_t* data, size_t len);
 std::string sha256_file(const std::string& path, bool& ok);
 std::string sha1_file(const std::string& path, bool& ok);
+std::string md5_file(const std::string& path, bool& ok);
+std::string sha512_file(const std::string& path, bool& ok);
+MultiHashResult multihash_file(const std::string& path, bool& ok);
 
 }  // namespace coreprobe

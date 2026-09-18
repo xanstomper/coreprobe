@@ -1,9 +1,13 @@
 // osleuth_core — CoreProbe native CLI.
-//   hash   <file>...        SHA-256 (+ SHA-1) evidence hashes
-//   verify <file> <hex>     check a file against an expected SHA-256
-//   bench  [bytes]          hashing throughput benchmark
-//   mbdb   <file>           parse Manifest.mbdb, flag traversal entries
-//   selftest                run built-in unit tests
+//   hash       [--sha1] <file>...   SHA-256 (+ SHA-1) evidence hashes
+//   multihash  <file>...            MD5 + SHA-1 + SHA-256 + SHA-512 in single pass
+//   hashmd5    <file>...            MD5 evidence hashes
+//   hash512    <file>...            SHA-512 evidence hashes
+//   verify     <file> <hex>         check a file against an expected SHA-256
+//   bench      [bytes]              hashing throughput benchmark
+//   mbdb       <file>               parse Manifest.mbdb, flag traversal entries
+//   manifest   <dir>                generate manifest of files
+//   selftest                        run built-in unit tests
 #include "core.h"
 
 #include <chrono>
@@ -55,6 +59,31 @@ static int cmd_selftest() {
     s1.reset();
     s1.update("abc", 3);
     check(s1.hex() == "a9993e364706816aba3e25717850c26c9cd0d89d", "sha1 abc", s1.hex());
+
+    Md5 smd5;
+    check(smd5.hex() == "d41d8cd98f00b204e9800998ecf8427e", "md5 empty", smd5.hex());
+    smd5.reset();
+    smd5.update("abc", 3);
+    check(smd5.hex() == "900150983cd24fb0d6963f7d28e17f72", "md5 abc", smd5.hex());
+    smd5.reset();
+    smd5.update("message digest", 14);
+    check(smd5.hex() == "f96b697d7cb7938d525a2f31aaf161d0", "md5 message digest", smd5.hex());
+
+    Sha512 s512;
+    check(s512.hex() == "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
+          "sha512 empty", s512.hex());
+    s512.reset();
+    s512.update("abc", 3);
+    check(s512.hex() == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+          "sha512 abc", s512.hex());
+
+    MultiHash mh;
+    mh.update("abc", 3);
+    auto mhr = mh.final();
+    check(mhr.md5 == "900150983cd24fb0d6963f7d28e17f72" &&
+          mhr.sha1 == "a9993e364706816aba3e25717850c26c9cd0d89d" &&
+          mhr.sha256 == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "multihash abc stream matches individual algorithms");
 
     // MBDB parse: header + one file record as produced by our verified
     // 26.6.1 writer (big-endian fields, count u16 BE, footer count+0xffffffff).
@@ -127,6 +156,39 @@ static int cmd_hash(const std::vector<std::string>& files, bool with_sha1) {
     return 0;
 }
 
+static int cmd_multihash(const std::vector<std::string>& files) {
+    for (const auto& f : files) {
+        bool ok = false;
+        auto res = multihash_file(f, ok);
+        if (!ok) { std::printf("unreadable: %s\n", f.c_str()); continue; }
+        std::printf("MD5    %s  %s\n", res.md5.c_str(), f.c_str());
+        std::printf("SHA1   %s  %s\n", res.sha1.c_str(), f.c_str());
+        std::printf("SHA256 %s  %s\n", res.sha256.c_str(), f.c_str());
+        std::printf("SHA512 %s  %s\n", res.sha512.c_str(), f.c_str());
+    }
+    return 0;
+}
+
+static int cmd_hashmd5(const std::vector<std::string>& files) {
+    for (const auto& f : files) {
+        bool ok = false;
+        std::string h = md5_file(f, ok);
+        if (!ok) { std::printf("unreadable: %s\n", f.c_str()); continue; }
+        std::printf("MD5 %s  %s\n", h.c_str(), f.c_str());
+    }
+    return 0;
+}
+
+static int cmd_hash512(const std::vector<std::string>& files) {
+    for (const auto& f : files) {
+        bool ok = false;
+        std::string h = sha512_file(f, ok);
+        if (!ok) { std::printf("unreadable: %s\n", f.c_str()); continue; }
+        std::printf("SHA512 %s  %s\n", h.c_str(), f.c_str());
+    }
+    return 0;
+}
+
 static int cmd_verify(const std::string& file, const std::string& expect_hex) {
     bool ok = false;
     std::string s = sha256_file(file, ok);
@@ -152,15 +214,27 @@ static int cmd_bench(uint64_t bytes) {
     double mbps = (double(done) / (1 << 20)) / secs;
     std::printf("hashed %llu MiB in %.3fs -> %.1f MiB/s (sha256)\n",
                 (unsigned long long)(done >> 20), secs, mbps);
-    // SHA-1 throughput too
-    Sha1 hs;
+
+    // MD5 throughput
+    Md5 hmd5;
     t0 = std::chrono::steady_clock::now();
     done = 0;
-    while (done + buf.size() <= bytes) { hs.update(buf.data(), buf.size()); done += buf.size(); }
+    while (done + buf.size() <= bytes) { hmd5.update(buf.data(), buf.size()); done += buf.size(); }
     t1 = std::chrono::steady_clock::now();
     secs = std::chrono::duration<double>(t1 - t0).count();
     mbps = (double(done) / (1 << 20)) / secs;
-    std::printf("hashed %llu MiB in %.3fs -> %.1f MiB/s (sha1)\n",
+    std::printf("hashed %llu MiB in %.3fs -> %.1f MiB/s (md5)\n",
+                (unsigned long long)(done >> 20), secs, mbps);
+
+    // MultiHash simultaneous throughput
+    MultiHash hmh;
+    t0 = std::chrono::steady_clock::now();
+    done = 0;
+    while (done + buf.size() <= bytes) { hmh.update(buf.data(), buf.size()); done += buf.size(); }
+    t1 = std::chrono::steady_clock::now();
+    secs = std::chrono::duration<double>(t1 - t0).count();
+    mbps = (double(done) / (1 << 20)) / secs;
+    std::printf("hashed %llu MiB in %.3fs -> %.1f MiB/s (multihash: md5+sha1+sha256+sha512)\n",
                 (unsigned long long)(done >> 20), secs, mbps);
     return 0;
 }
@@ -219,6 +293,9 @@ static void usage() {
         "osleuth_core - CoreProbe native core\n"
         "usage:\n"
         "  osleuth_core hash [--sha1] <file>...\n"
+        "  osleuth_core multihash <file>...\n"
+        "  osleuth_core hashmd5 <file>...\n"
+        "  osleuth_core hash512 <file>...\n"
         "  osleuth_core verify <file> <expected-sha256-hex>\n"
         "  osleuth_core bench [bytes=1GiB]\n"
         "  osleuth_core mbdb <Manifest.mbdb>\n"
@@ -231,6 +308,21 @@ int main(int argc, char** argv) {
     if (args.empty()) { usage(); return 2; }
     const std::string& cmd = args[0];
     if (cmd == "selftest") return cmd_selftest();
+    if (cmd == "multihash") {
+        std::vector<std::string> files(args.begin() + 1, args.end());
+        if (files.empty()) { usage(); return 2; }
+        return cmd_multihash(files);
+    }
+    if (cmd == "hashmd5") {
+        std::vector<std::string> files(args.begin() + 1, args.end());
+        if (files.empty()) { usage(); return 2; }
+        return cmd_hashmd5(files);
+    }
+    if (cmd == "hash512") {
+        std::vector<std::string> files(args.begin() + 1, args.end());
+        if (files.empty()) { usage(); return 2; }
+        return cmd_hash512(files);
+    }
     if (cmd == "hash") {
         bool sha1 = false;
         std::vector<std::string> files;

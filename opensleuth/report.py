@@ -10,6 +10,9 @@ from .util import fmt_size, iso_now
 
 _CSV_COLUMNS = {
     "messages": ["date", "chat", "sender", "from_me", "service", "text", "attachments", "id"],
+    "whatsapp": ["date", "chat", "sender", "from_me", "service", "text", "media", "id"],
+    "telegram": ["date", "chat", "sender", "from_me", "service", "text", "id"],
+    "locations": ["date", "latitude", "longitude", "type", "confidence", "details"],
     "contacts": ["name", "organization", "department", "phones", "emails", "other", "birthday", "created", "modified"],
     "calls": ["date", "phone", "direction", "type", "duration_seconds", "answered", "country"],
     "history": ["date", "url", "title", "visit_count", "origin", "load_successful"],
@@ -73,7 +76,17 @@ def _timeline(artifacts):
     events = []
     for m in artifacts.get("messages", []):
         if m.get("date"):
-            events.append((m["date"], "Message", ("Sent to " if m["from_me"] else "From ") + (_esc(m["chat"]) or "?") + ": " + _esc((m["text"] or "")[:120])))
+            events.append((m["date"], m.get("service") or "Message", ("Sent to " if m.get("from_me") else "From ") + (_esc(m.get("chat")) or "?") + ": " + _esc((m.get("text") or "")[:120])))
+    for m in artifacts.get("whatsapp", []):
+        if m.get("date"):
+            events.append((m["date"], "WhatsApp", ("Sent to " if m.get("from_me") else "From ") + (_esc(m.get("chat")) or "?") + ": " + _esc((m.get("text") or m.get("media") or "")[:120])))
+    for m in artifacts.get("telegram", []):
+        if m.get("date"):
+            events.append((m["date"], "Telegram", ("Sent to " if m.get("from_me") else "From ") + (_esc(m.get("chat")) or "?") + ": " + _esc((m.get("text") or "")[:120])))
+    for loc in artifacts.get("locations", []):
+        d = loc.get("date") or loc.get("entry_date")
+        if d:
+            events.append((d, "Location", _esc(f"{loc.get('type', 'GPS')}: {loc.get('latitude')}, {loc.get('longitude')} ({loc.get('details', '')})")))
     for c in artifacts.get("calls", []):
         if c.get("date"):
             events.append((c["date"], "Call", _esc(f"{c['type']} {c['direction']} {c.get('phone') or ''} ({c.get('duration_seconds') or 0}s)")))
@@ -96,10 +109,12 @@ def build_report(artifacts, outdir: Path, html_path=None):
 
     # CSVs
     timeline = _timeline(artifacts)
-    for name in ("messages", "contacts", "calls", "history", "bookmarks",
+    for name in ("messages", "whatsapp", "telegram", "locations", "contacts", "calls", "history", "bookmarks",
                  "keychain", "voicemail", "notes", "app_databases"):
         cols = _CSV_COLUMNS[name]
         rows = artifacts.get(name, [])
+        if not rows and name in ("whatsapp", "telegram", "locations"):
+            continue
         with open(outdir / f"{name}.csv", "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
@@ -297,6 +312,62 @@ def build_report(artifacts, outdir: Path, html_path=None):
         )
         + "</section>"
     )
+    if artifacts.get("whatsapp"):
+        sec.append(
+            "<section id=whatsapp><h2>WhatsApp Messages <span class=count>"
+            + str(len(artifacts.get("whatsapp", [])))
+            + "</span></h2>"
+            + _table(
+                ["Date", "Chat", "Sender", "Dir", "Text", "Media"],
+                artifacts.get("whatsapp", []),
+                lambda r: [
+                    _esc(r.get("date")),
+                    _esc(r.get("chat")),
+                    _esc(r.get("sender")),
+                    '<span class="badge {}">{}</span>'.format("out" if r.get("from_me") else "in", "Sent" if r.get("from_me") else "Recv"),
+                    _esc(r.get("text")),
+                    _esc(r.get("media")),
+                ],
+            )
+            + "</section>"
+        )
+    if artifacts.get("telegram"):
+        sec.append(
+            "<section id=telegram><h2>Telegram Messages <span class=count>"
+            + str(len(artifacts.get("telegram", [])))
+            + "</span></h2>"
+            + _table(
+                ["Date", "Chat", "Sender", "Dir", "Text"],
+                artifacts.get("telegram", []),
+                lambda r: [
+                    _esc(r.get("date")),
+                    _esc(r.get("chat")),
+                    _esc(r.get("sender")),
+                    '<span class="badge {}">{}</span>'.format("out" if r.get("from_me") else "in", "Sent" if r.get("from_me") else "Recv"),
+                    _esc(r.get("text")),
+                ],
+            )
+            + "</section>"
+        )
+    if artifacts.get("locations"):
+        sec.append(
+            "<section id=locations><h2>Locations & Telemetry <span class=count>"
+            + str(len(artifacts.get("locations", [])))
+            + "</span></h2>"
+            + _table(
+                ["Date", "Latitude", "Longitude", "Type", "Confidence", "Details"],
+                artifacts.get("locations", [])[:500],
+                lambda r: [
+                    _esc(r.get("date") or r.get("entry_date")),
+                    _esc(r.get("latitude")),
+                    _esc(r.get("longitude")),
+                    _esc(r.get("type")),
+                    _esc(r.get("confidence") or r.get("uncertainty")),
+                    _esc(r.get("details")),
+                ],
+            )
+            + "</section>"
+        )
     sec.append(
         "<section id=timeline><h2>Timeline <span class=count>"
         + str(len(timeline))
@@ -305,10 +376,19 @@ def build_report(artifacts, outdir: Path, html_path=None):
         + "</section>"
     )
 
+    all_nav = ["summary", "apps", "messages"]
+    if artifacts.get("whatsapp"):
+        all_nav.append("whatsapp")
+    if artifacts.get("telegram"):
+        all_nav.append("telegram")
+    if artifacts.get("locations"):
+        all_nav.append("locations")
+    all_nav.extend(["contacts", "calls", "history", "bookmarks",
+                    "keychain", "voicemail", "notes", "prefs", "databases", "files", "timeline"])
+
     nav_links = "".join(
         f'<a href="#{name}">{name.title().replace("_", " ")}</a>'
-        for name in ["summary", "apps", "messages", "contacts", "calls", "history", "bookmarks",
-                 "keychain", "voicemail", "notes", "prefs", "databases", "files", "timeline"]
+        for name in all_nav
     )
     html_doc = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -331,4 +411,70 @@ f.addEventListener('input',()=>{{
 </script>
 </body></html>"""
     (outdir / "report.html").write_text(html_doc, encoding="utf-8")
+    build_case_uco_report(artifacts, outdir)
     return outdir
+
+
+def build_case_uco_report(artifacts: dict, outdir: Path) -> Path:
+    """Generate a CASE / UCO (Unified Cyber Ontology) standard JSON-LD ontology report."""
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    dev = artifacts.get("device", {}) or {}
+    device_id = dev.get("udid") or "device-001"
+
+    graph = [
+        {
+            "@id": "urn:uuid:identity-examiner",
+            "@type": "uco-identity:Identity",
+            "uco-core:name": "CoreProbe Forensic Workstation",
+        },
+        {
+            "@id": f"urn:uuid:device-{device_id}",
+            "@type": "uco-observable:Device",
+            "uco-observable:manufacturer": "Apple Inc.",
+            "uco-observable:model": dev.get("product") or "iPhone",
+            "uco-observable:serialNumber": dev.get("serial") or "",
+        },
+    ]
+
+    for idx, m in enumerate(artifacts.get("messages", [])[:500]):
+        graph.append({
+            "@id": f"urn:uuid:msg-{idx}",
+            "@type": "uco-observable:Message",
+            "uco-observable:messageText": m.get("text") or "",
+            "uco-observable:sentTime": str(m.get("date") or ""),
+            "uco-observable:application": m.get("service") or "SMS",
+            "uco-observable:sender": str(m.get("sender") or ""),
+        })
+
+    for idx, m in enumerate(artifacts.get("whatsapp", [])[:500]):
+        graph.append({
+            "@id": f"urn:uuid:wa-{idx}",
+            "@type": "uco-observable:Message",
+            "uco-observable:messageText": m.get("text") or "",
+            "uco-observable:sentTime": str(m.get("date") or ""),
+            "uco-observable:application": "WhatsApp",
+            "uco-observable:sender": str(m.get("sender") or ""),
+        })
+
+    for idx, loc in enumerate(artifacts.get("locations", [])[:500]):
+        graph.append({
+            "@id": f"urn:uuid:loc-{idx}",
+            "@type": "uco-observable:Location",
+            "uco-observable:latitude": loc.get("latitude"),
+            "uco-observable:longitude": loc.get("longitude"),
+            "uco-observable:source": loc.get("type") or "telemetry",
+        })
+
+    uco_doc = {
+        "@context": {
+            "uco-core": "https://ontology.unifiedcyberontology.org/uco/core/",
+            "uco-observable": "https://ontology.unifiedcyberontology.org/uco/observable/",
+            "uco-identity": "https://ontology.unifiedcyberontology.org/uco/identity/",
+            "case-investigation": "https://ontology.caseontology.org/case/investigation/",
+        },
+        "@graph": graph,
+    }
+    uco_path = outdir / "case_uco.jsonld"
+    uco_path.write_text(json.dumps(uco_doc, indent=2, default=str), encoding="utf-8")
+    return uco_path

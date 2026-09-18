@@ -59,15 +59,18 @@ void Sha256::update(const void* data, size_t len) {
     if (done_) { reset(); }
     const uint8_t* p = static_cast<const uint8_t*>(data);
     total_ += len;
-    if (block_len_ > 0) {
+    while (len > 0) {
         size_t need = 64 - block_len_;
         size_t take = len < need ? len : need;
         memcpy(block_ + block_len_, p, take);
-        block_len_ += take; p += take; len -= take;
-        if (block_len_ == 64) { transform(block_); block_len_ = 0; }
+        block_len_ += take;
+        p += take;
+        len -= take;
+        if (block_len_ == 64) {
+            transform(block_);
+            block_len_ = 0;
+        }
     }
-    while (len >= 64) { transform(p); p += 64; len -= 64; }
-    if (len > 0) { memcpy(block_, p, len); block_len_ = len; }
 }
 
 void Sha256::final(uint8_t out[32]) {
@@ -96,10 +99,8 @@ std::string Sha256::hex() {
     return hex_encode(d, 32);
 }
 
-// ================================================================= sha1 ==
-static const uint32_t K1[4] = {0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xca62c1d6};
-
-static inline uint32_t rol32(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
+// =================================================================== sha1 ==
+static inline uint32_t rotl32(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
 
 void Sha1::reset() {
     h_[0] = 0x67452301; h_[1] = 0xefcdab89; h_[2] = 0x98badcfe;
@@ -113,16 +114,16 @@ void Sha1::transform(const uint8_t block[64]) {
         w[i] = (uint32_t(block[i*4]) << 24) | (uint32_t(block[i*4+1]) << 16) |
                (uint32_t(block[i*4+2]) << 8) | uint32_t(block[i*4+3]);
     for (int i = 16; i < 80; ++i)
-        w[i] = rol32(w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1);
+        w[i] = rotl32(w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1);
     uint32_t a = h_[0], b = h_[1], c = h_[2], d = h_[3], e = h_[4];
     for (int i = 0; i < 80; ++i) {
         uint32_t f, k;
-        if (i < 20)      { f = (b & c) | (~b & d);     k = K1[0]; }
-        else if (i < 40) { f = b ^ c ^ d;              k = K1[1]; }
-        else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = K1[2]; }
-        else             { f = b ^ c ^ d;              k = K1[3]; }
-        uint32_t tmp = rol32(a, 5) + f + e + k + w[i];
-        e = d; d = c; c = rol32(b, 30); b = a; a = tmp;
+        if (i < 20)      { f = (b & c) | ((~b) & d); k = 0x5a827999; }
+        else if (i < 40) { f = b ^ c ^ d;            k = 0x6ed9eba1; }
+        else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
+        else             { f = b ^ c ^ d;            k = 0xca62c1d6; }
+        uint32_t temp = rotl32(a, 5) + f + e + k + w[i];
+        e = d; d = c; c = rotl32(b, 30); b = a; a = temp;
     }
     h_[0] += a; h_[1] += b; h_[2] += c; h_[3] += d; h_[4] += e;
 }
@@ -131,15 +132,18 @@ void Sha1::update(const void* data, size_t len) {
     if (done_) { reset(); }
     const uint8_t* p = static_cast<const uint8_t*>(data);
     total_ += len;
-    if (block_len_ > 0) {
+    while (len > 0) {
         size_t need = 64 - block_len_;
         size_t take = len < need ? len : need;
         memcpy(block_ + block_len_, p, take);
-        block_len_ += take; p += take; len -= take;
-        if (block_len_ == 64) { transform(block_); block_len_ = 0; }
+        block_len_ += take;
+        p += take;
+        len -= take;
+        if (block_len_ == 64) {
+            transform(block_);
+            block_len_ = 0;
+        }
     }
-    while (len >= 64) { transform(p); p += 64; len -= 64; }
-    if (len > 0) { memcpy(block_, p, len); block_len_ = len; }
 }
 
 void Sha1::final(uint8_t out[20]) {
@@ -166,6 +170,228 @@ std::string Sha1::hex() {
     uint8_t d[20];
     final(d);
     return hex_encode(d, 20);
+}
+
+// ==================================================================== md5 ==
+static const uint32_t K_MD5[64] = {
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
+};
+
+static const uint32_t S_MD5[64] = {
+    7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
+    5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
+    4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
+    6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21
+};
+
+void Md5::reset() {
+    state_[0] = 0x67452301;
+    state_[1] = 0xefcdab89;
+    state_[2] = 0x98badcfe;
+    state_[3] = 0x10325476;
+    block_len_ = 0; total_ = 0; done_ = false;
+}
+
+void Md5::transform(const uint8_t block[64]) {
+    uint32_t a = state_[0], b = state_[1], c = state_[2], d = state_[3];
+    uint32_t x[16];
+    for (int i = 0; i < 16; ++i) {
+        x[i] = uint32_t(block[i*4]) |
+               (uint32_t(block[i*4+1]) << 8) |
+               (uint32_t(block[i*4+2]) << 16) |
+               (uint32_t(block[i*4+3]) << 24);
+    }
+    for (int i = 0; i < 64; ++i) {
+        uint32_t f, g;
+        if (i < 16) {
+            f = (b & c) | ((~b) & d);
+            g = i;
+        } else if (i < 32) {
+            f = (d & b) | ((~d) & c);
+            g = (5 * i + 1) % 16;
+        } else if (i < 48) {
+            f = b ^ c ^ d;
+            g = (3 * i + 5) % 16;
+        } else {
+            f = c ^ (b | (~d));
+            g = (7 * i) % 16;
+        }
+        uint32_t temp = d;
+        d = c;
+        c = b;
+        b = b + rotl32(a + f + K_MD5[i] + x[g], S_MD5[i]);
+        a = temp;
+    }
+    state_[0] += a;
+    state_[1] += b;
+    state_[2] += c;
+    state_[3] += d;
+}
+
+void Md5::update(const void* data, size_t len) {
+    if (done_) { reset(); }
+    const uint8_t* p = static_cast<const uint8_t*>(data);
+    total_ += len;
+    while (len > 0) {
+        size_t need = 64 - block_len_;
+        size_t take = len < need ? len : need;
+        memcpy(block_ + block_len_, p, take);
+        block_len_ += take;
+        p += take;
+        len -= take;
+        if (block_len_ == 64) {
+            transform(block_);
+            block_len_ = 0;
+        }
+    }
+}
+
+void Md5::final(uint8_t out[16]) {
+    if (done_) { memcpy(out, digest_, 16); return; }
+    uint64_t bits = total_ * 8;
+    uint8_t pad = 0x80;
+    update(&pad, 1);
+    uint8_t zero = 0;
+    while (block_len_ != 56) update(&zero, 1);
+    uint8_t lenb[8];
+    for (int i = 0; i < 8; ++i) lenb[i] = uint8_t(bits >> (8 * i));  // Little-endian
+    update(lenb, 8);
+    for (int i = 0; i < 4; ++i) {
+        digest_[i*4]   = uint8_t(state_[i]);
+        digest_[i*4+1] = uint8_t(state_[i] >> 8);
+        digest_[i*4+2] = uint8_t(state_[i] >> 16);
+        digest_[i*4+3] = uint8_t(state_[i] >> 24);
+    }
+    done_ = true;
+    memcpy(out, digest_, 16);
+}
+
+std::string Md5::hex() {
+    uint8_t d[16];
+    final(d);
+    return hex_encode(d, 16);
+}
+
+// ================================================================= sha512 ==
+static const uint64_t K512[80] = {
+    0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL,
+    0x3956c25bf348b538ULL, 0x59f111f1b605d019ULL, 0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL,
+    0xd807aa98a3030242ULL, 0x12835b0145706fbeULL, 0x243185be4ee4b28cULL, 0x550c7dc3d5ffb4e2ULL,
+    0x72be5d74f27b896fULL, 0x80deb1fe3b1696b1ULL, 0x9bdc06a725c71235ULL, 0xc19bf174cf692694ULL,
+    0xe49b69c19ef14ad2ULL, 0xefbe4786384f25e3ULL, 0x0fc19dc68b8cd5b5ULL, 0x240ca1cc77ac9c65ULL,
+    0x2de92c6f592b0275ULL, 0x4a7484aa6ea6e483ULL, 0x5cb0a9dcbd41fbd4ULL, 0x76f988da831153b5ULL,
+    0x983e5152ee66dfabULL, 0xa831c66d2db43210ULL, 0xb00327c898fb213fULL, 0xbf597fc7beef0ee4ULL,
+    0xc6e00bf33da88fc2ULL, 0xd5a79147930aa725ULL, 0x06ca6351e003826fULL, 0x142929670a0e6e70ULL,
+    0x27b70a8546d22ffcULL, 0x2e1b21385c26c926ULL, 0x4d2c6dfc5ac42aedULL, 0x53380d139d95b3dfULL,
+    0x650a73548baf63deULL, 0x766a0abb3c77b2a8ULL, 0x81c2c92e47edaee6ULL, 0x92722c851482353bULL,
+    0xa2bfe8a14cf10364ULL, 0xa81a664bbc423001ULL, 0xc24b8b70d0f89791ULL, 0xc76c51a30654be30ULL,
+    0xd192e819d6ef5218ULL, 0xd69906245565a910ULL, 0xf40e35855771202aULL, 0x106aa07032bbd1b8ULL,
+    0x19a4c116b8d2d0c8ULL, 0x1e376c085141ab53ULL, 0x2748774cdf8eeb99ULL, 0x34b0bcb5e19b48a8ULL,
+    0x391c0cb3c5c95a63ULL, 0x4ed8aa4ae3418acbULL, 0x5b9cca4f7763e373ULL, 0x682e6ff3d6b2b8a3ULL,
+    0x748f82ee5defb2fcULL, 0x78a5636f43172f60ULL, 0x84c87814a1f0ab72ULL, 0x8cc702081a6439ecULL,
+    0x90befffa23631e28ULL, 0xa4506cebde82bde9ULL, 0xbef9a3f7b2c67915ULL, 0xc67178f2e372532bULL,
+    0xca273eceea26619cULL, 0xd186b8c721c0c207ULL, 0xeada7dd6cde0eb1eULL, 0xf57d4f7fee6ed178ULL,
+    0x06f067aa72176fbaULL, 0x0a637dc5a2c898a6ULL, 0x113f9804bef90daeULL, 0x1b710b35131c471bULL,
+    0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL, 0x431d67c49c100d4cULL,
+    0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
+};
+
+static inline uint64_t rotr64(uint64_t x, int n) { return (x >> n) | (x << (64 - n)); }
+
+void Sha512::reset() {
+    h_[0] = 0x6a09e667f3bcc908ULL;
+    h_[1] = 0xbb67ae8584caa73bULL;
+    h_[2] = 0x3c6ef372fe94f82bULL;
+    h_[3] = 0xa54ff53a5f1d36f1ULL;
+    h_[4] = 0x510e527fade682d1ULL;
+    h_[5] = 0x9b05688c2b3e6c1fULL;
+    h_[6] = 0x1f83d9abfb41bd6bULL;
+    h_[7] = 0x5be0cd19137e2179ULL;
+    block_len_ = 0; total_ = 0; done_ = false;
+}
+
+void Sha512::transform(const uint8_t block[128]) {
+    uint64_t w[80];
+    for (int i = 0; i < 16; ++i) {
+        w[i] = (uint64_t(block[i*8]) << 56) |
+               (uint64_t(block[i*8+1]) << 48) |
+               (uint64_t(block[i*8+2]) << 40) |
+               (uint64_t(block[i*8+3]) << 32) |
+               (uint64_t(block[i*8+4]) << 24) |
+               (uint64_t(block[i*8+5]) << 16) |
+               (uint64_t(block[i*8+6]) << 8)  |
+               uint64_t(block[i*8+7]);
+    }
+    for (int i = 16; i < 80; ++i) {
+        uint64_t s0 = rotr64(w[i-15], 1) ^ rotr64(w[i-15], 8) ^ (w[i-15] >> 7);
+        uint64_t s1 = rotr64(w[i-2], 19) ^ rotr64(w[i-2], 61) ^ (w[i-2] >> 6);
+        w[i] = w[i-16] + s0 + w[i-7] + s1;
+    }
+    uint64_t a = h_[0], b = h_[1], c = h_[2], d = h_[3];
+    uint64_t e = h_[4], f = h_[5], g = h_[6], h = h_[7];
+    for (int i = 0; i < 80; ++i) {
+        uint64_t S1 = rotr64(e, 14) ^ rotr64(e, 18) ^ rotr64(e, 41);
+        uint64_t ch = (e & f) ^ ((~e) & g);
+        uint64_t t1 = h + S1 + ch + K512[i] + w[i];
+        uint64_t S0 = rotr64(a, 28) ^ rotr64(a, 34) ^ rotr64(a, 39);
+        uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
+        uint64_t t2 = S0 + maj;
+        h = g; g = f; f = e; e = d + t1;
+        d = c; c = b; b = a; a = t1 + t2;
+    }
+    h_[0] += a; h_[1] += b; h_[2] += c; h_[3] += d;
+    h_[4] += e; h_[5] += f; h_[6] += g; h_[7] += h;
+}
+
+void Sha512::update(const void* data, size_t len) {
+    if (done_) { reset(); }
+    const uint8_t* p = static_cast<const uint8_t*>(data);
+    total_ += len;
+    while (len > 0) {
+        size_t need = 128 - block_len_;
+        size_t take = len < need ? len : need;
+        memcpy(block_ + block_len_, p, take);
+        block_len_ += take;
+        p += take;
+        len -= take;
+        if (block_len_ == 128) {
+            transform(block_);
+            block_len_ = 0;
+        }
+    }
+}
+
+void Sha512::final(uint8_t out[64]) {
+    if (done_) { memcpy(out, digest_, 64); return; }
+    uint64_t bits = total_ * 8;
+    uint8_t pad = 0x80;
+    update(&pad, 1);
+    uint8_t zero = 0;
+    while (block_len_ != 112) update(&zero, 1);
+    // 128-bit length (big-endian): high 64 bits = 0, low 64 bits = bits
+    uint8_t lenb[16] = {0};
+    for (int i = 0; i < 8; ++i) lenb[8 + i] = uint8_t(bits >> (56 - 8 * i));
+    update(lenb, 16);
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            digest_[i * 8 + j] = uint8_t(h_[i] >> (56 - 8 * j));
+        }
+    }
+    done_ = true;
+    memcpy(out, digest_, 64);
+}
+
+std::string Sha512::hex() {
+    uint8_t d[64];
+    final(d);
+    return hex_encode(d, 64);
 }
 
 // ================================================================= mbdb ==
@@ -309,6 +535,48 @@ std::string sha1_file(const std::string& path, bool& ok) {
     std::string s1;
     hash_file(path, ok, &s1);
     return s1;
+}
+
+std::string md5_file(const std::string& path, bool& ok) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) { ok = false; return "unreadable"; }
+    Md5 h;
+    char buf[1 << 16];
+    while (f) {
+        f.read(buf, sizeof buf);
+        std::streamsize n = f.gcount();
+        if (n > 0) h.update(buf, size_t(n));
+    }
+    ok = !f.bad();
+    return h.hex();
+}
+
+std::string sha512_file(const std::string& path, bool& ok) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) { ok = false; return "unreadable"; }
+    Sha512 h;
+    char buf[1 << 16];
+    while (f) {
+        f.read(buf, sizeof buf);
+        std::streamsize n = f.gcount();
+        if (n > 0) h.update(buf, size_t(n));
+    }
+    ok = !f.bad();
+    return h.hex();
+}
+
+MultiHashResult multihash_file(const std::string& path, bool& ok) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) { ok = false; return {"unreadable", "unreadable", "unreadable", "unreadable"}; }
+    MultiHash h;
+    char buf[1 << 16];
+    while (f) {
+        f.read(buf, sizeof buf);
+        std::streamsize n = f.gcount();
+        if (n > 0) h.update(buf, size_t(n));
+    }
+    ok = !f.bad();
+    return h.final();
 }
 
 }  // namespace coreprobe

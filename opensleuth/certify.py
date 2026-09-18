@@ -53,6 +53,24 @@ def _native_hash(f: Path) -> str:
     return h.hexdigest()
 
 
+def _native_multihash(f: Path) -> dict[str, str]:
+    """Calculate MD5, SHA-1, SHA-256 in a single pass."""
+    try:
+        from . import cxx
+        return cxx.multihash_file(f)
+    except Exception:
+        pass
+    h256 = hashlib.sha256()
+    hmd5 = hashlib.md5()
+    h1 = hashlib.sha1()
+    with open(f, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h256.update(chunk)
+            hmd5.update(chunk)
+            h1.update(chunk)
+    return {"sha256": h256.hexdigest(), "md5": hmd5.hexdigest(), "sha1": h1.hexdigest()}
+
+
 def _derive_key(passphrase: str | None, keyfile: Path | None, out: Path) -> bytes:
     if passphrase:
         return hashlib.sha256(passphrase.encode()).digest()
@@ -95,8 +113,12 @@ def certify(case_dir: str | Path, out: str | Path, examiner: str,
             size = f.stat().st_size
         except OSError:
             continue
+        mh = _native_multihash(f)
         entries.append({"relpath": rel, "size": size,
-                        "sha256": _native_hash(f), "mtime": _now()})
+                        "sha256": mh.get("sha256") or _native_hash(f),
+                        "md5": mh.get("md5", ""),
+                        "sha1": mh.get("sha1", ""),
+                        "mtime": _now()})
 
     manifest_csv = _manifest_lines(entries)
     (out / MANIFEST_NAME).write_text(manifest_csv)
@@ -108,6 +130,7 @@ def certify(case_dir: str | Path, out: str | Path, examiner: str,
         "tool": tool,
         "generated_at": _now(),
         "examiner": examiner,
+        "attestation": f"I, {examiner}, certify that the evidence listed herein was acquired, hashed, and sealed using {tool} without modification.",
         "case_dir": str(case_dir),
         "file_count": len(entries),
         "hash_engine": "osleuth_core(cpp)" if _cpp_available() else "hashlib(py)",

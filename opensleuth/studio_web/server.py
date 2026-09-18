@@ -464,6 +464,32 @@ class Handler(BaseHTTPRequestHandler):
                 "tools": forensics.detect(),
                 "summary": forensics.summary(),
             }))
+        elif path == "/api/doctor":
+            from .. import doctor
+            self._send(200, json.dumps(doctor.run(), default=str))
+        elif path == "/api/uco":
+            qs = parse_qs(parsed.query)
+            case_id = qs.get("case", [""])[0]
+            if not case_id:
+                cs = _cases()
+                if cs:
+                    case_id = cs[0].get("case_id", "")
+            dest = Path.home() / "cases" / case_id / "report" / "case_uco.jsonld"
+            if dest.is_file():
+                try:
+                    self._send(200, dest.read_text(), "application/ld+json")
+                    return
+                except Exception:
+                    pass
+            self._send(404, b'{"error":"case_uco.jsonld not found"}', "application/json")
+        elif path == "/api/multihash":
+            qs = parse_qs(parsed.query)
+            p = _safe_case_file(qs.get("path", [""])[0])
+            if not p:
+                self._send(400, b'{"error":"invalid path under ~/cases"}', "application/json")
+                return
+            from .. import cxx
+            self._send(200, json.dumps(cxx.multihash_file(p)))
         elif path == "/api/stance":
             from .. import forensics
             self._send(200, json.dumps({

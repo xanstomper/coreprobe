@@ -102,6 +102,43 @@ def add_parser(sub):
     mn.add_argument("--out", help="also write the manifest to this file")
     mn.set_defaults(fn=cmd_manifest)
 
+    mh = p_sub.add_parser("multihash", help="MD5 + SHA-1 + SHA-256 + SHA-512 single-pass evidence hash")
+    mh.add_argument("files", nargs="+")
+    mh.set_defaults(fn=cmd_multihash)
+
+
+def multihash_file(path: str | Path) -> dict[str, str]:
+    """Return dict with md5, sha1, sha256, sha512 hashes computed in a single pass."""
+    path = Path(path)
+    try:
+        r = run(["multihash", str(path)], check=True)
+        out = {}
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] in ("MD5", "SHA1", "SHA256", "SHA512"):
+                out[parts[0].lower()] = parts[1]
+        if "sha256" in out and "md5" in out:
+            return out
+    except Exception:
+        pass
+    import hashlib
+    m = hashlib.md5()
+    s1 = hashlib.sha1()
+    s256 = hashlib.sha256()
+    s512 = hashlib.sha512()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 18), b""):
+            m.update(chunk)
+            s1.update(chunk)
+            s256.update(chunk)
+            s512.update(chunk)
+    return {
+        "md5": m.hexdigest(),
+        "sha1": s1.hexdigest(),
+        "sha256": s256.hexdigest(),
+        "sha512": s512.hexdigest(),
+    }
+
 
 def _pre():
     try:
@@ -122,6 +159,13 @@ def cmd_hash(args):
     _pre()
     cmd = ["hash"] + (["--sha1"] if args.sha1 else []) + args.files
     r = run(cmd, check=False)
+    print(r.stdout, end="")
+    sys.exit(r.returncode)
+
+
+def cmd_multihash(args):
+    _pre()
+    r = run(["multihash"] + args.files, check=False)
     print(r.stdout, end="")
     sys.exit(r.returncode)
 

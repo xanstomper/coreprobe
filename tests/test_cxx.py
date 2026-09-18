@@ -126,3 +126,26 @@ def test_cli_cxx_mbdb(crafted_mbdb):
         capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 0
     assert "traversal entries: 3" in r.stdout
+
+
+def test_native_multihash(binary, tmp_path):
+    f = tmp_path / "multi.bin"
+    f.write_bytes(b"coreprobe forensic multihash verification stream")
+    res = cxx.multihash_file(f)
+    assert res["md5"] == hashlib.md5(f.read_bytes()).hexdigest()
+    assert res["sha1"] == hashlib.sha1(f.read_bytes()).hexdigest()
+    assert res["sha256"] == hashlib.sha256(f.read_bytes()).hexdigest()
+    assert res["sha512"] == hashlib.sha512(f.read_bytes()).hexdigest()
+
+
+def test_cli_cxx_multihash(tmp_path):
+    f = tmp_path / "stream.bin"
+    f.write_bytes(b"test multihash cli output")
+    r = subprocess.run(
+        [sys.executable, "-m", "opensleuth", "cxx", "multihash", str(f)],
+        capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode == 0
+    assert "MD5" in r.stdout
+    assert "SHA1" in r.stdout
+    assert "SHA256" in r.stdout
+    assert "SHA512" in r.stdout

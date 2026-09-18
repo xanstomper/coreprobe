@@ -12,7 +12,8 @@ from pathlib import Path
 
 from . import __version__
 from .backup import Backup, BackupError
-from .artifacts import sms, contacts, calls, safari, plists, keychain, voicemail, notes
+from .artifacts import (sms, contacts, calls, safari, plists, keychain,
+                       voicemail, notes, whatsapp, telegram, signal, locations)
 from .matrix import chip_for, recommend, render, KNOWN_DEVICES, PROFILES
 from .report import build_report
 
@@ -1107,6 +1108,9 @@ def cmd_dump(args):
         "device": backup.backup_state(),
         "apps": [],
         "messages": [],
+        "whatsapp": [],
+        "telegram": [],
+        "locations": [],
         "contacts": [],
         "calls": [],
         "history": [],
@@ -1177,6 +1181,45 @@ def cmd_dump(args):
         artifacts["notes"] = notes.parse(backup, blob_dir=Path(args.out) / "notes_blobs")
     except Exception as exc:
         errs.append(f"notes: {exc}")
+
+    # WhatsApp
+    for rec in backup.find(pattern="%ChatStorage.sqlite"):
+        p = backup.get_path(rec["domain"], rec["relativePath"])
+        if p:
+            try:
+                wa_res = whatsapp.parse(p)
+                if wa_res and wa_res.get("messages"):
+                    artifacts["whatsapp"] = wa_res["messages"]
+                    break
+            except Exception as exc:  # noqa: BLE001
+                errs.append(f"whatsapp: {exc}")
+
+    # Telegram
+    for rec in backup.find(pattern="%tgdata.db"):
+        p = backup.get_path(rec["domain"], rec["relativePath"])
+        if p:
+            try:
+                tg_res = telegram.parse(p)
+                if tg_res and tg_res.get("messages"):
+                    artifacts["telegram"] = tg_res["messages"]
+                    break
+            except Exception as exc:  # noqa: BLE001
+                errs.append(f"telegram: {exc}")
+
+    # Locations
+    locs = []
+    for pat in ("%consolidated.db", "%cache_encryptedA.db", "%routined%Cache.sqlite"):
+        for rec in backup.find(pattern=pat):
+            p = backup.get_path(rec["domain"], rec["relativePath"])
+            if p:
+                try:
+                    loc_res = locations.parse(p)
+                    if loc_res and loc_res.get("locations"):
+                        locs.extend(loc_res["locations"])
+                except Exception as exc:  # noqa: BLE001
+                    errs.append(f"locations: {exc}")
+    if locs:
+        artifacts["locations"] = locs
 
     # inventory every app database so examiners can drill into any app
     app_dbs = []

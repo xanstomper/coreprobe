@@ -263,6 +263,42 @@ def parse_tlv(image: bytes, source: str = "<sep>") -> list[dict[str, Any]]:
     return entries
 
 
+def analyze_entropy(blob: bytes, sample_stride: int = 64) -> float:
+    """Calculate Shannon entropy (0.0 to 8.0) over a byte buffer."""
+    import math
+    from collections import Counter
+    if not blob:
+        return 0.0
+    samples = blob[::sample_stride] if len(blob) > 1024 else blob
+    counts = Counter(samples)
+    total = len(samples)
+    return round(-sum((c / total) * math.log2(c / total) for c in counts.values()), 3)
+
+
+def scan_crypto_constants(blob: bytes) -> list[dict[str, Any]]:
+    """Scan firmware bytes for standard cryptographic tables and initial vectors."""
+    markers = []
+    # AES Forward S-box header (first 8 bytes)
+    aes_sbox_head = bytes([0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5])
+    pos = blob.find(aes_sbox_head)
+    if pos != -1:
+        markers.append({"type": "AES_SBOX", "offset": pos, "description": "AES Forward Substitution Box"})
+
+    # SHA-256 initial constants H[0..1] in big-endian
+    sha256_be = bytes.fromhex("6a09e667bb67ae85")
+    pos = blob.find(sha256_be)
+    if pos != -1:
+        markers.append({"type": "SHA256_IV_BE", "offset": pos, "description": "SHA-256 Initial Vector (BE)"})
+
+    # SHA-256 initial constants H[0..1] in little-endian
+    sha256_le = bytes.fromhex("67e6096a85ae67bb")
+    pos = blob.find(sha256_le)
+    if pos != -1:
+        markers.append({"type": "SHA256_IV_LE", "offset": pos, "description": "SHA-256 Initial Vector (LE)"})
+
+    return markers
+
+
 def analyze_macho(blob: bytes) -> dict[str, Any] | None:
     """First-pass Mach-O facts of the SEPOS binary."""
     if blob[:4] not in MACHO_MAGICS:
@@ -270,13 +306,34 @@ def analyze_macho(blob: bytes) -> dict[str, Any] | None:
     little = blob[:4] in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe")
     is64 = blob[:4] in (b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe")
     magic, cputype = struct.unpack("<II" if little else ">II", blob[:8])
+    ncmds = struct.unpack("<I" if not is64 else "<I", blob[16:20])[0] if len(blob) > 20 else None
+
+    segments = []
+    if ncmds:
+        hdr_size = 32 if is64 else 28
+        off = hdr_size
+        for _ in range(min(ncmds, 64)):
+            if off + 8 > len(blob):
+                break
+            cmd, cmdsize = struct.unpack("<II" if little else ">II", blob[off:off + 8])
+            if cmdsize == 0 or off + cmdsize > len(blob):
+                break
+            if cmd in (0x19, 0x01):  # LC_SEGMENT_64 / LC_SEGMENT
+                seg_name = blob[off + 8:off + 24].split(b"\x00", 1)[0].decode("latin-1", "replace")
+                if seg_name:
+                    segments.append(seg_name)
+            off += cmdsize
+
     return {
         "magic": f"0x{magic:08x}",
         "cputype": cputype,
         "arch": {12: "arm", 0x0100000C: "arm64"}.get(cputype, f"cpu-{cputype}"),
         "is64": is64,
         "size": len(blob),
-        "ncmds": struct.unpack("<I" if not is64 else "<I", blob[16:20])[0] if len(blob) > 20 else None,
+        "ncmds": ncmds,
+        "segments": segments,
+        "entropy": analyze_entropy(blob),
+        "crypto_markers": scan_crypto_constants(blob),
     }
 
 

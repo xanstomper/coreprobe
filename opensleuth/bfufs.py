@@ -42,6 +42,11 @@ INTEREST_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(keychain|keybag|escrow)", re.I), "keychain/keys"),
     (re.compile(r"(sms\.db|callhistory|voicemail|addressbook)", re.I), "comm-logs"),
     (re.compile(r"(instagram|tiktok|snapchat|facebook|messenger)", re.I), "social"),
+    (re.compile(r"(authenticator|totp|duo|authy|2fa|yubico)", re.I), "auth/2fa"),
+    (re.compile(r"(wallet|metamask|trustwallet|coinbase|crypto|phantom|exodus)", re.I), "crypto/wallets"),
+    (re.compile(r"(vpn|wireguard|openvpn|shadowsocks|tailscale|ipsec)", re.I), "vpn/network"),
+    (re.compile(r"(mail|exchange|outlook|imap|mime)", re.I), "email"),
+    (re.compile(r"(1password|bitwarden|lastpass|keepass|enpass)", re.I), "vaults"),
 ]
 
 
@@ -135,3 +140,38 @@ def render_report(rep: dict[str, Any]) -> str:
         lines.append("Readable files are plaintext at BFU: pull + preserve them now.")
     lines.append("Metadata targets: pair with keybag unwrap / escrow to decrypt.")
     return "\n".join(lines)
+
+
+def inspect_bfu_sqlite(path: str | Path) -> dict[str, Any]:
+    """Inspect whether a BFU database has readable SQLite header / pages."""
+    p = Path(path)
+    if not p.is_file():
+        return {"exists": False}
+    size = p.stat().st_size
+    if size < 16:
+        return {"exists": True, "size": size, "readable_header": False, "is_sqlite": False}
+    with open(p, "rb") as fh:
+        hdr = fh.read(16)
+    is_sqlite = (hdr == b"SQLite format 3\x00")
+    wal_path = p.with_name(p.name + "-wal")
+    has_wal = wal_path.is_file()
+    return {
+        "exists": True,
+        "size": size,
+        "is_sqlite": is_sqlite,
+        "readable_header": is_sqlite,
+        "has_wal": has_wal,
+        "wal_size": wal_path.stat().st_size if has_wal else 0,
+    }
+
+
+def export_bfu_manifest(rows: list[dict[str, Any]], out_path: str | Path) -> Path:
+    """Export BFU scan rows to JSON for triage reporting."""
+    import json
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({
+        "total_files": len(rows),
+        "files": rows,
+    }, indent=2, default=str), encoding="utf-8")
+    return out_path
