@@ -352,6 +352,23 @@ class TestCliWiring:
         assert "ReportGenerated" in types
         assert types[-1] == "SessionCompleted"
 
+    def test_ileapp_run_failure_is_journaled(self, tmp_path):
+        # iLEAPP is not installed in CI -> run_iLEAPP returns ok:False,
+        # exercising the failure-journaling path of `ileapp run --case`.
+        case = tmp_path / "case"
+        r = self._run_cli("ileapp", "run", str(tmp_path / "input"),
+                          "--out", str(tmp_path / "ilout"),
+                          "--case", str(case), "--examiner", "Jane")
+        assert r.returncode == 1
+        jf = next(iter((case / "journal").glob("S-*.jsonl")))
+        events = [json.loads(x) for x in jf.read_text().splitlines()]
+        types = [e["event_type"] for e in events]
+        assert "Error" in types
+        assert types[-1] == "SessionCompleted"
+        err = next(e for e in events if e["event_type"] == "Error")
+        assert err["component"] == "ileapp-run"
+        assert err["payload"]["final_status"] == "failed"
+
     def test_no_case_flag_means_no_journal(self, tmp_path):
         bin_dir = self._fake_bin(tmp_path, "ideviceinfo",
                                  "ProductType: iPhone12,1")

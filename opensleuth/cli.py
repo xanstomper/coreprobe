@@ -1520,12 +1520,25 @@ def cmd_tools(args):
 
 def cmd_ileapp_run(args):
     from . import ileapp
+    j, _ = _journal_from_args(args, notes=f"ileapp run {args.input} -> {args.out}")
     r = ileapp.run_iLEAPP(args.input, args.out, itype=args.type)
     if not r.get("ok"):
+        j and j.failure("Error", "ileapp-run",
+                        "iLEAPP parse failed",
+                        str(r.get("error", "")),
+                        final_status="failed")
+        j and j.complete({"ok": False})
         print(f"ileapp: {r.get('error')}", file=sys.stderr)
         if r.get("log_tail"):
             print(r["log_tail"][-500:], file=sys.stderr)
         sys.exit(1)
+    if j:
+        j.emit("ArtifactParsed", {"source": str(args.input),
+                                  "parser": "iLEAPP",
+                                  "output_dir": r.get("output_dir", "")})
+        _record_evidence_tree(j, r.get("output_dir") or args.out,
+                              "iLEAPP report tree")
+        j.complete({"ok": True, "output_dir": r.get("output_dir", "")})
     print(f"iLEAPP completed ({r['returncode']}) -> {r['output_dir']}")
     print("run 'opensleuth ileapp breath <case> --ileapp-out OUT --out REPORT' to merge")
     if r.get("log_tail"):
@@ -2322,6 +2335,8 @@ def main(argv=None):
     ilr.add_argument("input", help="extraction dir or tar/gz/zip")
     ilr.add_argument("--out", required=True)
     ilr.add_argument("--type", default="fs", choices=["fs", "logical", "tar", "gz", "zip"])
+    ilr.add_argument("--case", help="case dir: journal iLEAPP parse events (M3)")
+    ilr.add_argument("--examiner", help="operator name recorded in the case journal")
     ilr.set_defaults(fn=cmd_ileapp_run)
     ilb = il_sub.add_parser("breath", help="merge CoreProbe DB inventory + iLEAPP outputs into breath-report.json")
     ilb.add_argument("case", help="extraction/case dir")
