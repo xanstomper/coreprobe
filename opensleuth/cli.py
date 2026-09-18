@@ -2,12 +2,14 @@ import os
 """Command line interface for opensleuth."""
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
 import tarfile
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
@@ -34,9 +36,85 @@ def _no_device_exit(tool: str) -> None:
     )
 
 
+# ------------------------------------------------------------ journal (M3)
+def _journal_from_args(args, notes: str = ""):
+    """Open an append-only session journal under <case>/journal/ when the
+    user passed --case; returns (journal or None, case_dir or None).
+
+    The journal is the audit backbone: acquisitions, evidence IDs, custody
+    events, failures - all structured, all replayable (see opensleuth/journal.py).
+    """
+    case = getattr(args, "case", None)
+    if not case:
+        return None, None
+    from .journal import new_session
+
+    case_dir = Path(case)
+    case_dir.mkdir(parents=True, exist_ok=True)
+    j = new_session(case_dir, operator=getattr(args, "examiner", "") or "",
+                    notes=notes)
+    return j, case_dir
+
+
+def _journal_device(j) -> str:
+    """Best-effort device ref for journal events (UDID when known)."""
+    return getattr(j, "_device_id", "") if j is not None else ""
+
+
+def _journal_evidence(j, path, method: str, device_id: str = "",
+                      hash_value: str = "", extra: dict | None = None) -> str:
+    """Allocate an evidence ID (EVD-...) and record creation + hash for
+    `path` in the case journal. Returns the evidence id (or '')."""
+    if j is None:
+        return ""
+    p = Path(path)
+    size = p.stat().st_size if p.exists() else 0
+    rec = j.evidence_created(str(p), size, method, device_id=device_id,
+                             hash_value=hash_value,
+                             extra=extra or {})
+    return rec["evidence_id"]
+
+
+def _sha256_file(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _record_evidence_tree(j, root, method: str, device_id: str = "",
+                          extra: dict | None = None) -> str:
+    """Record an acquired file tree as ONE evidence item with a
+    deterministic tree hash: sha256 over sorted "relpath\tsha256" lines.
+    Files under <case>/journal/ are excluded (the journal must not hash
+    itself; it is append-only and still growing)."""
+    if j is None:
+        return ""
+    root = Path(root)
+    journal_dir = getattr(j, "journal_dir", None)
+    lines = []
+    for f in sorted(root.rglob("*")):
+        if not f.is_file():
+            continue
+        if journal_dir is not None and journal_dir in f.parents:
+            continue
+        lines.append(f"{f.relative_to(root).as_posix()}\t{_sha256_file(f)}")
+    tree_hash = hashlib.sha256("\n".join(lines).encode()).hexdigest()
+    return _journal_evidence(j, root, method, device_id=device_id,
+                             hash_value=tree_hash,
+                             extra={"files": len(lines), "tree": True,
+                                    **(extra or {})})
+
+
 def cmd_acquire_backup(args):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    j, _ = _journal_from_args(args, notes=f"acquire backup -> {out}")
+    dev = getattr(args, "udid", "") or ""
+    if j:
+        j.emit("AcquisitionStarted", {"method": "idevicebackup2 backup",
+                                      "dest": str(out)}, device_id=dev)
     cmd = ["idevicebackup2"]
     if args.udid:
         cmd += ["-u", args.udid]
@@ -44,21 +122,44 @@ def cmd_acquire_backup(args):
     try:
         _run(cmd)
     except FileNotFoundError:
+        j and j.failure("Error", "acquire-backup",
+                        "idevicebackup2 not found",
+                        "install libimobiledevice-utils",
+                        final_status="aborted")
         sys.exit("idevicebackup2 not found (install libimobiledevice-utils)")
     except subprocess.CalledProcessError:
+        j and j.failure("DeviceDisconnected", "acquire-backup",
+                        "no device or backup failed",
+                        f"idevicebackup2 rc failure -> {out}",
+                        final_status="aborted")
         _no_device_exit("idevicebackup2")
+    # hash + evidence record for the finished backup
+    _record_evidence_tree(j, out, "idevicebackup2 backup", dev)
+    if j:
+        j.emit("AcquisitionCompleted", {"dest": str(out)}, device_id=dev)
+        j.complete({"dest": str(out), "method": "idevicebackup2"})
     print(f"backup written to {out}")
 
 
 def cmd_acquire_media(args):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    j, _ = _journal_from_args(args, notes=f"acquire media -> {out}")
+    dev = getattr(args, "udid", "") or ""
+    if j:
+        j.emit("AcquisitionStarted", {"method": "ifuse+AFC", "dest": str(out)},
+               device_id=dev)
     mnt = Path(tempfile.mkdtemp(prefix="sleuth-mnt-"))
     try:
         _run(["ifuse"] + (["-u", args.udid] if args.udid else []) + [str(mnt)])
     except FileNotFoundError:
+        j and j.failure("Error", "acquire-media", "ifuse not found",
+                        "install ifuse + fuse", final_status="aborted")
         sys.exit("ifuse not found (install ifuse + fuse)")
     except subprocess.CalledProcessError:
+        j and j.failure("DeviceDisconnected", "acquire-media",
+                        "no device or AFC mount failed", "ifuse rc failure",
+                        final_status="aborted")
         _no_device_exit("ifuse")
     try:
         for d in ("DCIM", "Downloads", "Recordings", "Books", "Podcasts", "Voicemail"):
@@ -71,6 +172,10 @@ def cmd_acquire_media(args):
             _run(["fusermount", "-u", str(mnt)])
         except subprocess.CalledProcessError:
             pass
+    _record_evidence_tree(j, out, "ifuse+AFC media copy", dev)
+    if j:
+        j.emit("AcquisitionCompleted", {"dest": str(out)}, device_id=dev)
+        j.complete({"dest": str(out), "method": "ifuse+AFC"})
     print(f"media written to {out}")
 
 
@@ -89,6 +194,12 @@ def cmd_acquire_info(args):
             k, _, v = line.partition(":")
             info[k.strip()] = v.strip()
     out.write_text(json.dumps(info, indent=2), encoding="utf-8")
+    j, _ = _journal_from_args(args, notes=f"acquire info -> {out}")
+    if j:
+        dev = info.get("UniqueDeviceID", getattr(args, "udid", "") or "")
+        _journal_evidence(j, out, "ideviceinfo (lockdown)", device_id=dev,
+                          hash_value=_sha256_file(out))
+        j.complete({"dest": str(out), "method": "ideviceinfo"})
     print(f"device info written to {out}")
 
 
@@ -118,6 +229,13 @@ def cmd_acquire_apps(args):
     except subprocess.CalledProcessError:
         sys = {"system_apps": 0, "count": len(apps)}
     out.write_text(json.dumps({"apps": apps, "summary": sys}, indent=2), encoding="utf-8")
+    j, _ = _journal_from_args(args, notes=f"acquire apps -> {out}")
+    if j:
+        _journal_evidence(j, out, "ideviceinstaller inventory",
+                          device_id=getattr(args, "udid", "") or "",
+                          hash_value=_sha256_file(out))
+        j.complete({"dest": str(out), "method": "ideviceinstaller",
+                    "apps": len(apps)})
     print(f"app inventory written to {out}")
 
 
@@ -149,17 +267,39 @@ def cmd_extract(args):
     print(f"extracted {copied} files to {out}")
 
 
+# module-level journal for _step() (acquire all runs many steps through it)
+_ACTIVE_JOURNAL = None
+
+
 def _step(name, fn):
-    """Run one acquisition step, log outcome, never abort the chain."""
+    """Run one acquisition step, log outcome, never abort the chain.
+    Every outcome (ok/skip/fail) is journaled when a case journal is active."""
     try:
         fn()
         print(f"[ok]   {name}")
+        if _ACTIVE_JOURNAL is not None:
+            _ACTIVE_JOURNAL.emit("AcquisitionCompleted", {"step": name})
     except FileNotFoundError as exc:
         print(f"[skip] {name}: missing tool: {exc}")
+        if _ACTIVE_JOURNAL is not None:
+            _ACTIVE_JOURNAL.failure(
+                "Warning", f"acquire-all:{name}",
+                f"step skipped: required tool missing",
+                str(exc), final_status="skipped")
     except subprocess.CalledProcessError as exc:
         print(f"[fail] {name}: rc={exc.returncode}")
+        if _ACTIVE_JOURNAL is not None:
+            _ACTIVE_JOURNAL.failure(
+                "Error", f"acquire-all:{name}",
+                f"acquisition step failed (rc={exc.returncode})",
+                final_status="failed")
     except Exception as exc:  # noqa: BLE001
         print(f"[fail] {name}: {exc}")
+        if _ACTIVE_JOURNAL is not None:
+            _ACTIVE_JOURNAL.failure(
+                "Error", f"acquire-all:{name}",
+                f"acquisition step failed: {type(exc).__name__}",
+                str(exc), final_status="failed")
 
 
 def _free_space_gb(path):
@@ -168,19 +308,32 @@ def _free_space_gb(path):
 
 def cmd_acquire_all(args):
     """Maximum logical acquisition: every service the OS exposes to a trusted host."""
+    global _ACTIVE_JOURNAL
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     sub = lambda *p: out.joinpath(*p)  # noqa: E731
+    j, _ = _journal_from_args(args, notes=f"acquire all -> {out}")
+    _ACTIVE_JOURNAL = j
 
     # --- preflight -------------------------------------------------------
     proc = subprocess.run(["idevice_id", "-l"], capture_output=True, text=True)
     udids = [u for u in proc.stdout.split() if u]
     if not udids:
+        if j:
+            j.failure("DeviceDisconnected", "acquire-all",
+                      "no Apple device detected on USB",
+                      "idevice_id -l returned no UDIDs",
+                      final_status="aborted")
+            j.complete({"aborted": True})
+        _ACTIVE_JOURNAL = None
         sys.exit(
             "no Apple device detected on USB (usbmuxd). Plug the iPhone in, unlock it,\n"
             "tap 'Trust' if prompted, then rerun this command."
         )
     print(f"device: {udids[0]}")
+    if j:
+        j.emit("DeviceDetected", {"udid": udids[0], "count": len(udids)},
+               device_id=udids[0])
     free = _free_space_gb(out)
     print(f"disk free: {free:.1f} GiB" + (" (WARNING: encrypted+unencrypted backups need >= 20 GiB)" if free < 20 else ""))
 
@@ -227,6 +380,12 @@ def cmd_acquire_all(args):
         _step("sysdiagnose (tap Allowed on phone)",
               lambda: _run(["pymobiledevice3", "crash", "sysdiagnose", str(sub("sysdiagnose"))]))
 
+    _record_evidence_tree(j, out, "acquire-all (logical acquisition)",
+                          udids[0] if udids else "")
+    if j:
+        j.emit("AcquisitionCompleted", {"dest": str(out)}, device_id=udids[0])
+        j.complete({"dest": str(out)})
+    _ACTIVE_JOURNAL = None
     print("\nacquisition complete ->", out)
     print("next: opensleuth extract <backup>/<UDID> -o <appdata>   (app containers)")
     print("      opensleuth dump <backup>/<UDID> -o <report>         (artifact report)")
@@ -981,6 +1140,15 @@ def cmd_plan(args):
         json.dumps({"device_class": device_class, "ios": ver, "chip": chip,
                     "steps": recommend(chip, ver)}, indent=2), encoding="utf-8"
     )
+    j, _ = _journal_from_args(args, notes=f"plan -> {pout / 'plan.json'}")
+    if j:
+        j.emit("CapabilityAssessed",
+               {"summary": f"{device_class} chip={chip or '?'} iOS {ver}",
+                "top_steps": recommend(chip, ver)[:3]},
+               device_id=info.get("UniqueDeviceID", ""))
+        _journal_evidence(j, pout / "plan.json", "route planner",
+                          hash_value=_sha256_file(pout / "plan.json"))
+        j.complete({"device_class": device_class, "ios": ver})
     print(f"plan written to {pout / 'plan.json'}")
 
 
@@ -1013,6 +1181,12 @@ def cmd_acquire_jailbroken(args):
             else:
                 shutil.copy2(name, dst)
         keychain = mnt / "var" / "Keychains" / "keychain-2.db"
+        j, _ = _journal_from_args(args, notes=f"acquire jailbroken -> {out}")
+        _record_evidence_tree(j, out, "AFC2 jailbroken full-fs pull",
+                              getattr(args, "udid", "") or "")
+        if j:
+            j.emit("AcquisitionCompleted", {"dest": str(out)})
+            j.complete({"method": "ifuse --root"})
         print("jailbroken filesystem pulled to", out)
         print("keychain-2.db present:", keychain.exists(), ("(saved at %s)" % (out / "keychain-2.db") if keychain.exists() else ""))
     finally:
@@ -1069,6 +1243,17 @@ def cmd_acquire_probe(args):
 
     (out / "probe.json").write_text(json.dumps(res, indent=2, default=str), encoding="utf-8")
     state = "recovery/DFU" if res["recovery_dfu"] else ("AFU+paired" if res["lockdown"].get("reachable") else "BFU or unpaired")
+    j, _ = _journal_from_args(args, notes=f"acquire probe -> {out / 'probe.json'}")
+    if j:
+        for u in res["usb"]:
+            if u.get("serial"):
+                j.emit("DeviceDetected", {"product": u.get("product", ""),
+                                          "serial": u["serial"],
+                                          "mode": u.get("mode", "")},
+                       device_id=u["serial"])
+        _journal_evidence(j, out / "probe.json", "usb+lockdown probe",
+                          hash_value=_sha256_file(out / "probe.json"))
+        j.complete({"state": state})
     print(f"probe written to {out / 'probe.json'}")
     print(f"device state: {state}")
     for u in res["usb"]:
@@ -1289,7 +1474,33 @@ def cmd_dump(args):
     artifacts["files"]["file_index"] = str(idx_path)
     artifacts["files"]["indexed"] = True
 
+    # M3.4: provenance envelope - derived artifacts trace to parser + source
+    manifest_db = Path(args.backup) / "Manifest.db"
+    artifacts["provenance"] = {
+        "tool": "opensleuth",
+        "tool_version": __version__,
+        "parser": "opensleuth.artifacts suite",
+        "source_path": str(args.backup),
+        "source_manifest_sha256": _sha256_file(manifest_db) if manifest_db.exists() else "",
+        "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "warnings": errs,
+    }
+    j, _ = _journal_from_args(args, notes=f"dump {args.backup} -> {args.out}")
+    if j:
+        for e in errs:
+            j.failure("ParserFailure", "dump", "artifact parse failure", e,
+                      final_status="continued")
+        j.emit("ArtifactParsed", {"source": str(args.backup),
+                                  "parser": "opensleuth.artifacts",
+                                  "warnings": len(errs)})
     out = build_report(artifacts, Path(args.out))
+    if j:
+        report_path = Path(out)
+        if report_path.is_dir():
+            report_path = report_path / "artifacts.json"
+        _journal_evidence(j, report_path, "opensleuth dump report",
+                          hash_value=_sha256_file(report_path))
+        j.complete({"report": str(report_path), "warnings": len(errs)})
     print(f"report written to {out}")
     print(f"  artifacts: messages={len(artifacts['messages'])} contacts={len(artifacts['contacts'])} "
           f"calls={len(artifacts['calls'])} history={len(artifacts['history'])} bookmarks={len(artifacts['bookmarks'])}")
@@ -1342,6 +1553,20 @@ def cmd_certify(args):
     pw = os.environ.get(args.passphrase_env) if args.passphrase_env else None
     r = certify.certify(args.case_dir, args.out, args.examiner,
                         passphrase=pw, keyfile=args.keyfile)
+    # M3: sealing is a journaled event in its own session (created after the
+    # hash walk, so the seal covers everything that existed before sealing)
+    try:
+        from .journal import new_session as _new_session
+        jj = _new_session(args.case_dir, operator=args.examiner,
+                          notes="certify: manifest + seal")
+        jj.emit("ReportGenerated", {
+            "manifest": r["manifest"], "report": r["report"],
+            "html": r["html"], "files": r["file_count"],
+            "seal": r["seal"][:16] + "...",
+        })
+        jj.complete({"sealed_files": r["file_count"]})
+    except Exception:  # noqa: BLE001 - journaling must never block certification
+        pass
     print(f"certified {r['file_count']} files")
     print(f"  manifest : {r['manifest']}")
     print(f"  report   : {r['report']}")
@@ -2002,6 +2227,11 @@ def main(argv=None):
     jb.add_argument("--udid")
     jb.add_argument("--ssh", help="SSH fallback: host (root@IP) instead of AFC2")
     jb.set_defaults(fn=cmd_acquire_jailbroken)
+    # journal flags live on EACH acquire subcommand (argparse: a subparser's
+    # default would otherwise clobber the parent-parsed value)
+    for _sp in acq_sub.choices.values():
+        _sp.add_argument("--case", help="case dir: journal every step + evidence IDs (M3)")
+        _sp.add_argument("--examiner", help="operator name recorded in the case journal")
 
     m = sub.add_parser("matrix", help="public exploitation capability for a chip/iOS combo")
     m.add_argument("chip", help="e.g. A12, A13, A11")
@@ -2025,6 +2255,8 @@ def main(argv=None):
     ex.set_defaults(fn=cmd_exploits)
     pl = sub.add_parser("plan", help="recommended extraction route for the connected device")
     pl.add_argument("--out", required=True)
+    pl.add_argument("--case", help="case dir: journal the plan decision (M3)")
+    pl.add_argument("--examiner", help="operator name recorded in the case journal")
     pl.set_defaults(fn=cmd_plan)
     rsch = sub.add_parser("research", help="public iOS research pipeline: new CVEs/disclosures relevant to acquisition")
     rsch.add_argument("--detailed", action="store_true", help="include impact/description text")
@@ -2057,6 +2289,8 @@ def main(argv=None):
     d = sub.add_parser("dump", help="parse a backup directory into a report")
     d.add_argument("backup")
     d.add_argument("-o", "--out", required=True)
+    d.add_argument("--case", help="case dir: journal parse events + provenance (M3)")
+    d.add_argument("--examiner", help="operator name recorded in the case journal")
     d.set_defaults(fn=cmd_dump)
 
     from . import cxx
