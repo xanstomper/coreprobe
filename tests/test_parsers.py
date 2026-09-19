@@ -51,9 +51,12 @@ class TestHostileInput:
         assert "schema mismatch" in r.error
 
     def test_unexpected_exception_contained(self, tmp_path):
+        f = tmp_path / "real.db"
+        f.write_bytes(b"")  # exists, so the file check passes
+
         def boom(path):
             raise RuntimeError("kaboom")
-        r = safe_parse("x", "1", "sqlite", boom, tmp_path / "whatever")
+        r = safe_parse("x", "1", "sqlite", boom, f)
         assert r.ok is False
         assert r.error_kind == "RuntimeError"
         assert "kaboom" in r.error

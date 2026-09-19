@@ -85,13 +85,15 @@ def safe_parse(name: str, version: str, source_format: str,
         return res
     try:
         data = parse_fn(p)
+    except sqlite3.OperationalError as exc:
+        # OperationalError subclasses DatabaseError, so it must be caught
+        # FIRST to classify schema/permission issues distinctly.
+        res.error_kind = type(exc).__name__
+        res.error = f"schema mismatch: {exc}"
+        return res
     except sqlite3.DatabaseError as exc:
         res.error_kind = type(exc).__name__
         res.error = f"malformed database: {exc}"
-        return res
-    except sqlite3.OperationalError as exc:
-        res.error_kind = type(exc).__name__
-        res.error = f"schema mismatch: {exc}"
         return res
     except Exception as exc:  # noqa: BLE001
         res.error_kind = type(exc).__name__
