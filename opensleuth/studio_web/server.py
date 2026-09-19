@@ -237,7 +237,8 @@ def _sha256(path_str):
     p = Path(path_str).expanduser()
     cases_root = Path.home() / "cases"
     try:
-        if not str(p.resolve()).startswith(str(cases_root.resolve())) or not p.is_file():
+        rp = p.resolve()
+        if not rp.is_relative_to(cases_root.resolve()) or not rp.is_file():
             return {"error": "path must be a file under ~/cases"}
         if p.stat().st_size > 200 * 1024 * 1024:
             return {"error": "file too large for on-demand hashing (limit 200 MB)"}
@@ -271,11 +272,16 @@ def _report(case):
 
 
 def _safe_case_file(path_str):
+    """Confine web-accessible files strictly UNDER ~/cases.
+
+    Uses Path.is_relative_to (not startswith) so sibling directories like
+    ~/cases-evil cannot bypass the check.
+    """
     p = Path(path_str).expanduser()
     root = (Path.home() / "cases").resolve()
     try:
         rp = p.resolve()
-        if str(rp).startswith(str(root)) and rp.is_file():
+        if rp.is_relative_to(root) and rp.is_file():
             return rp
     except OSError:
         pass
@@ -407,6 +413,13 @@ def _export(case_id):
 
 def _parse_image(path_str):
     p = Path(path_str).expanduser()
+    cases_root = (Path.home() / "cases").resolve()
+    try:
+        rp = p.resolve()
+        if not rp.is_relative_to(cases_root):
+            return {"error": "path must be a backup directory under ~/cases"}
+    except OSError:
+        return {"error": "invalid path"}
     if not (p / "Manifest.db").is_file():
         return {"error": "not a backup directory (Manifest.db missing)"}
     try:
@@ -481,7 +494,11 @@ class Handler(BaseHTTPRequestHandler):
         full = STATIC / path.lstrip("/")
         if full.is_dir():
             full = full / "index.html"
-        if not full.is_file() or str(full.resolve())[:len(str(STATIC.resolve()))] != str(STATIC.resolve()):
+        try:
+            inside = full.resolve().is_relative_to(STATIC.resolve())
+        except OSError:
+            inside = False
+        if not full.is_file() or not inside:
             self._send(404, b"not found")
             return
         ctype = "text/html"
@@ -852,7 +869,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
             return
         if parsed.path == "/api/case":
-            dest = Path(data.get("destination", str(Path.home() / "cases" / data.get("case_id", "default"))))
+            cases_root = (Path.home() / "cases").resolve()
+            default_dest = str(cases_root / data.get("case_id", "default"))
+            dest = Path(data.get("destination", default_dest)).expanduser()
+            try:
+                rp = dest.resolve()
+            except OSError:
+                self._send(400, json.dumps(
+                    {"error": "invalid destination"}).encode(),
+                    "application/json")
+                return
+            if not rp.is_relative_to(cases_root):
+                self._send(400, json.dumps(
+                    {"error": "destination must be under ~/cases"}).encode(),
+                    "application/json")
+                return
+            dest = rp
             dest.mkdir(parents=True, exist_ok=True)
             cj = dest / "case.json"
             existing = {}
@@ -875,7 +907,18 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_warm_icons, daemon=True).start()
             self._send(200, json.dumps({"started": RCONS["running"], "total": RCONS["total"]}))
         elif parsed.path == "/api/acquire":
-            dest = Path(data.get("destination"))
+            dest = Path(data.get("destination", ""))
+            cases_root = (Path.home() / "cases").resolve()
+            try:
+                rp = dest.expanduser().resolve()
+            except OSError:
+                rp = None
+            if rp is None or not rp.is_relative_to(cases_root):
+                self._send(400, json.dumps(
+                    {"error": "destination must be under ~/cases"}).encode(),
+                    "application/json")
+                return
+            dest = rp
             dest.mkdir(parents=True, exist_ok=True)
             # kick off actual acquisition in a background thread
             threading.Thread(target=self._do_acquire, args=(data,), daemon=True).start()

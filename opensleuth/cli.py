@@ -1088,6 +1088,62 @@ def cmd_autoexploit(args):
     print(f"\nreport written to {out / 'autoexploit.json'}")
 
 
+def cmd_capabilities(args):
+    """Truth-gated capability registry view (status machine + auditor)."""
+    from .truth import TruthRegistry, RegistryError, render, REGISTRY_PATH
+
+    try:
+        reg = TruthRegistry.load(args.registry or REGISTRY_PATH)
+    except RegistryError as exc:
+        print(f"registry problem: {exc}")
+        print("falling back to the built-in seed registry")
+        reg = TruthRegistry.load(REGISTRY_PATH) if args.registry else __import__(
+            "opensleuth.truth", fromlist=["default_registry"]).default_registry()
+    if getattr(args, "audit", False):
+        problems = reg.audit()
+        if problems:
+            print("CAPABILITY AUDIT FAILURE:")
+            for p in problems:
+                print("  -", p)
+            sys.exit(1)
+        print("capability audit: OK (registry consistent)")
+        return
+    print(render(reg, category=getattr(args, "category", "") or ""))
+
+
+def cmd_fingerprint(args):
+    """Fingerprint the attached device with per-property source+confidence."""
+    from .fingerprint import fingerprint_device, render as fp_render
+
+    fp = fingerprint_device()
+    print(fp_render(fp))
+    if args.json:
+        import json as _json
+        print(_json.dumps(fp.to_dict(), indent=2, default=str))
+
+
+def cmd_acquire_plan(args):
+    """Truth-gated acquisition plan for the attached device (or --chip/--ios)."""
+    from .fingerprint import Fingerprint, fingerprint_device, render as fp_render
+    from .planner import Planner, render_plan
+
+    if args.chip or args.ios or args.state:
+        fp = Fingerprint()
+        if args.chip:
+            fp.set("chip", args.chip.upper(), "CLI argument", "Observed")
+        if args.ios:
+            fp.set("ios", args.ios, "CLI argument", "Observed")
+        fp.set("state", args.state or "AFU", "CLI argument", "Observed")
+    else:
+        fp = fingerprint_device()
+        print(fp_render(fp))
+    methods = Planner().plan(fp)
+    print(render_plan(methods, fp))
+    if args.json:
+        import json as _json
+        print(_json.dumps([m.__dict__ for m in methods], indent=2, default=str))
+
+
 def cmd_versions(args):
     """Authoritative public jailbreak status per firmware version."""
     from .versions import render_26, render_27, render_all
@@ -2287,6 +2343,20 @@ def main(argv=None):
                     help="allow A10/A11 checkm8 on iOS-16+ locked devices (documented passcode-bypass caveat)")
     ae.add_argument("--timeout", type=int, default=300, help="per-route subprocess timeout (seconds)")
     ae.set_defaults(fn=cmd_autoexploit)
+    cap = sub.add_parser("capabilities", help="truth-gated capability registry: statuses, evidence, audit")
+    cap.add_argument("--category", default="", help="filter: acquisition|bootrom|kernel|research")
+    cap.add_argument("--audit", action="store_true", help="run the consistency auditor (exit 1 on failure)")
+    cap.add_argument("--registry", default="", help="path to capabilities.json")
+    cap.set_defaults(fn=cmd_capabilities)
+    fp_ = sub.add_parser("fingerprint", help="device fingerprint with per-property source+confidence")
+    fp_.add_argument("--json", action="store_true")
+    fp_.set_defaults(fn=cmd_fingerprint)
+    pln = sub.add_parser("plan2", help="truth-gated acquisition plan (AVAILABLE / VALIDATION REQUIRED / RESEARCH ONLY)")
+    pln.add_argument("--chip", default="")
+    pln.add_argument("--ios", default="")
+    pln.add_argument("--state", default="", help="AFU|BFU|DFU|recovery|absent")
+    pln.add_argument("--json", action="store_true")
+    pln.set_defaults(fn=cmd_acquire_plan)
     ver = sub.add_parser("versions", help="authoritative per-firmware public jailbreak status (iOS 18/26/27, tvOS, bridgeOS)")
     ver.add_argument("ios", nargs="?", default="", help="specific version, e.g. 26.0.1")
     ver.add_argument("--ipados", action="store_true", help="show the iPadOS 26 table")
