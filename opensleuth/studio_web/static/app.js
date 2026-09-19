@@ -1028,7 +1028,7 @@ async function startAutoExploit() {
       body: JSON.stringify({ allow_destructive: allowD }),
     });
     if (r.busy) { toast("Auto-exploiter already running", "amber"); }
-    else if (r.started) { toast("Auto-exploiter started", "green"); }
+    else if (r.started) { toast("Auto-exploiter started", "green"); pollAutoExploit(); }
     else { toast("Auto-exploiter failed to start", "red"); }
   } catch { toast("Auto-exploiter request failed", "red"); }
   await render();
@@ -1041,8 +1041,13 @@ async function pollAutoExploit() {
     const pane = document.getElementById("ae-pane");
     if (pane) pane.innerHTML = await renderAutoExploitPane(st);
     setTimeout(pollAutoExploit, 1500);
+  } else if (st && !st.finished_at) {
+    // POST accepted but the worker thread hasn't flipped running=true yet;
+    // keep polling until we see a finished state (race-safe).
+    setTimeout(pollAutoExploit, 700);
   } else if (st && st.report) {
     toast(st.report.winner ? `Route succeeded: ${st.report.winner}` : "No route succeeded this run", st.report.winner ? "green" : "amber");
+    await render();
   }
 }
 
