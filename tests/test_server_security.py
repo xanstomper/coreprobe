@@ -172,8 +172,19 @@ class TestJournalEndpoints:
         assert "SessionCompleted" in types
         assert verify_journal_file(files[0])["ok"] is True
 
-    def test_plan2_endpoint_returns_truth(self, web):
+    def test_plan2_endpoint_returns_truth(self, web, monkeypatch):
         tmp, port = web
+        # deterministic: force an absent-device fingerprint regardless of
+        # what is physically plugged into the test workstation
+        from opensleuth.fingerprint import Fingerprint
+
+        def fake_fp():
+            fp = Fingerprint()
+            fp.set("present", False, "test", "Observed")
+            fp.set("state", "absent", "test", "Observed")
+            fp.set("chip", "", "test", "Unknown")
+            return fp
+        monkeypatch.setattr("opensleuth.fingerprint.fingerprint_device", fake_fp)
         status, body = _get(port, "/api/plan2")
         assert status == 200
         data = json.loads(body)
