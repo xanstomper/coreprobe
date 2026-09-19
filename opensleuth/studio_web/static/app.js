@@ -1011,6 +1011,18 @@ async function resetExploitsTarget() {
 
 /* ---------------- auto-exploiter (AXIOM/Cellebrite-style) ---------------- */
 let AEXPLOIT = null;          // {running, report, error, log, finished_at}
+let AE_DESTRUCTIVE = false;   // survives re-renders (checkbox state)
+let AE_INTERACTING = false;   // suppress full re-render while user works
+
+function toggleAeDestructive(v) {
+  AE_DESTRUCTIVE = !!v;
+}
+
+function markInteracting() {
+  AE_INTERACTING = true;
+  clearTimeout(markInteracting._t);
+  markInteracting._t = setTimeout(() => { AE_INTERACTING = false; }, 4000);
+}
 
 async function refreshAutoExploit() {
   try { AEXPLOIT = await api("/api/autoexploit"); }
@@ -1019,7 +1031,9 @@ async function refreshAutoExploit() {
 }
 
 async function startAutoExploit() {
-  const allowD = document.getElementById("ae-destructive")?.checked || false;
+  const allowD = document.getElementById("ae-destructive")?.checked ?? AE_DESTRUCTIVE;
+  AE_DESTRUCTIVE = allowD;
+  markInteracting();
   toast("Auto-exploiter running: probing + trying routes...", "blue");
   try {
     const r = await api("/api/autoexploit", {
@@ -1031,7 +1045,6 @@ async function startAutoExploit() {
     else if (r.started) { toast("Auto-exploiter started", "green"); pollAutoExploit(); }
     else { toast("Auto-exploiter failed to start", "red"); }
   } catch { toast("Auto-exploiter request failed", "red"); }
-  await render();
 }
 
 async function pollAutoExploit() {
@@ -1078,7 +1091,7 @@ async function renderAutoExploitPane(st) {
     <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
       ${st.running ? `<span class="status-pill amber">● RUNNING</span>` : (rep && rep.winner) ? `<span class="status-pill green">SUCCESS</span>` : `<span class="status-pill">IDLE</span>`}
       <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer">
-        <input type="checkbox" id="ae-destructive"> Allow destructive (A10/A11 checkm8 on iOS 16+)
+        <input type="checkbox" id="ae-destructive" ${AE_DESTRUCTIVE ? "checked" : ""} oninput="toggleAeDestructive(this.checked)"> Allow destructive (A10/A11 checkm8 on iOS 16+)
       </label>
       <button class="btn primary" style="margin-left:auto" onclick="startAutoExploit()" ${st.running ? "disabled" : ""}>${st.running ? "Running…" : "▶ Auto-Exploit Device"}</button>
       ${st.running ? `<button class="btn" onclick="setTimeout(pollAutoExploit,1200)">Refresh</button>` : ""}
@@ -1431,6 +1444,14 @@ async function refreshAll() {
   ARTIFACTS._log = logr.lines || [];
   document.getElementById("evidence-count").textContent =
     ((ARTIFACTS.messages?.length || 0) + (ARTIFACTS.contacts?.length || 0) + (ARTIFACTS.calls?.length || 0)) + " items";
+  // Never wipe the DOM while the user is interacting (checkboxes, inputs,
+  // buttons) or while an auto-exploit run is in progress: update data only,
+  // and re-render just the auto-exploiter pane in place instead.
+  if (AE_INTERACTING || (AEXPLOIT && AEXPLOIT.running)) {
+    const pane = document.getElementById("ae-pane");
+    if (pane) pane.innerHTML = await renderAutoExploitPane(AEXPLOIT);
+    return;
+  }
   render();
 }
 
@@ -1745,3 +1766,9 @@ async function runCertify() {
     toast((r && r.error) || "failed", "red");
   }
 }
+
+// mark interaction on ANY control so the 8s auto-refresh never fights the
+// user (checkboxes stay checked, inputs keep focus/text)
+document.addEventListener("click", () => markInteracting(), true);
+document.addEventListener("input", () => markInteracting(), true);
+document.addEventListener("change", () => markInteracting(), true);
