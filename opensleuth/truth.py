@@ -151,8 +151,30 @@ class TruthRegistry:
         return list(self._caps.values())
 
     def operational(self) -> list[Capability]:
-        """The ONLY pool the acquisition planner may select from."""
-        return [c for c in self._caps.values() if c.operational()]
+        """The ONLY pool the acquisition planner may select from.
+
+        Defensive: a capability qualifies only if its status is
+        REGRESSION_TESTED AND it passes the per-capability audit checks
+        (adapter, VALIDATED evidence, fixture) — so even direct attribute
+        mutation cannot smuggle an unvalidated capability into the pool.
+        """
+        out = []
+        for c in self._caps.values():
+            if c.status != OPERATIONAL_STATUS:
+                continue
+            if self._audit_capability(c):
+                out.append(c)
+        return out
+
+    def _audit_capability(self, c: Capability) -> bool:
+        """True when this capability raises no audit problems."""
+        saved = self._caps  # audit() reads the whole registry; run targeted
+        try:
+            single = TruthRegistry.__new__(TruthRegistry)
+            single._caps = {c.capability_id: c}
+            return not single.audit()
+        finally:
+            self._caps = saved
 
     def by_category(self, category: str) -> list[Capability]:
         return [c for c in self._caps.values() if c.category == category]

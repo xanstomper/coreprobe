@@ -255,3 +255,17 @@ class TestRender:
     def test_status_labels(self):
         assert T.status_label("REGRESSION_TESTED") == "OPERATIONAL"
         assert T.status_label("DOCUMENTED") == "DOCUMENTED"
+
+
+class TestDefensivePool:
+    def test_direct_mutation_cannot_smuggle_into_operational(self):
+        """Adversarial: setting status by hand (bypassing promote()) must not
+        put a capability into the operational pool without evidence."""
+        reg = T.default_registry()
+        reg.get("checkm8-pwn").status = "REGRESSION_TESTED"
+        assert "checkm8-pwn" not in {c.capability_id for c in reg.operational()}
+        # with evidence + fixture the same status DOES qualify
+        reg.record_validation("checkm8-pwn", "VALIDATED", environment="lab",
+                              at="2026-09-19T00:00:00")
+        reg.get("checkm8-pwn").test_fixture = "lab-fixture"
+        assert "checkm8-pwn" in {c.capability_id for c in reg.operational()}

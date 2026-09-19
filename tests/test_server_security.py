@@ -202,3 +202,16 @@ class TestJournalEndpoints:
         s = data["sessions"][0]
         assert s["verify"]["ok"] is True
         assert "replay" in s
+
+
+class TestSymlinkAttacks:
+    def test_symlink_escape_rejected(self, web):
+        """A symlink inside ~/cases pointing outside must not be served."""
+        tmp, port = web
+        outside = tmp / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("stolen")
+        link = tmp / "cases" / "leak.txt"
+        link.symlink_to(outside / "secret.txt")
+        status, out = _post_json(port, "/api/hash", {"path": str(link)})
+        assert "error" in out, "symlink escape leaked file content hash"
