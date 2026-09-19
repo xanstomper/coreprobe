@@ -141,3 +141,64 @@ class TestStaticServe:
         tmp, port = web
         status, body = _get(port, "/../opensleuth/cli.py")
         assert status == 404
+
+
+class TestJournalEndpoints:
+    def test_web_acquire_creates_real_journal(self, web):
+        """The directive's core requirement: case records come from actual
+        backend events, not UI fakery. A web acquire (which fails fast with
+        no device) must still leave a session journal with failure events."""
+        import time
+        tmp, port = web
+        dest = tmp / "cases" / "jcase"
+        status, out = _post_json(port, "/api/acquire", {"destination": str(dest)})
+        assert status == 200 and out.get("started") is True
+        # wait for the background task to COMPLETE journaling
+        from opensleuth.journal import SessionJournal, verify_journal_file
+        files = []
+        for _ in range(60):
+            jdir = dest / "journal"
+            files = sorted(jdir.glob("S-*.jsonl")) if jdir.is_dir() else []
+            if files:
+                j = SessionJournal(dest, files[0].stem)
+                if "SessionCompleted" in [e["event_type"] for e in j.read()]:
+                    break
+            time.sleep(0.25)
+        assert files, "no journal written by acquire flow"
+        j = SessionJournal(dest, files[0].stem)
+        types = [e["event_type"] for e in j.read()]
+        assert "SessionStarted" in types
+        assert "AcquisitionStarted" in types
+        assert "SessionCompleted" in types
+        assert verify_journal_file(files[0])["ok"] is True
+
+    def test_plan2_endpoint_returns_truth(self, web):
+        tmp, port = web
+        status, body = _get(port, "/api/plan2")
+        assert status == 200
+        data = json.loads(body)
+        assert "fingerprint" in data and "methods" in data
+        # with no device, only offline capabilities may be selectable
+        assert set(data["selectable"]) <= {"device-info", "backup-parse"}
+
+    def test_journal_endpoint_lists_sessions(self, web):
+        import time
+        tmp, port = web
+        dest = tmp / "cases" / "jcase2"
+        _post_json(port, "/api/acquire", {"destination": str(dest)})
+        from opensleuth.journal import SessionJournal
+        for _ in range(60):
+            jdir = dest / "journal"
+            files = sorted(jdir.glob("S-*.jsonl")) if jdir.is_dir() else []
+            if files:
+                j = SessionJournal(dest, files[0].stem)
+                if "SessionCompleted" in [e["event_type"] for e in j.read()]:
+                    break
+            time.sleep(0.25)
+        status, body = _get(port, "/api/journal?case=jcase2")
+        data = json.loads(body)
+        assert status == 200
+        assert data["sessions"], "journal endpoint returned no sessions"
+        s = data["sessions"][0]
+        assert s["verify"]["ok"] is True
+        assert "replay" in s

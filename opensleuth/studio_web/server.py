@@ -568,6 +568,40 @@ class Handler(BaseHTTPRequestHandler):
                 "log": AEXPLOIT["log"],
                 "finished_at": AEXPLOIT["finished_at"],
             }, default=str))
+        elif path == "/api/plan2":
+            from ..fingerprint import fingerprint_device, render as fp_render
+            from ..planner import Planner, render_plan
+            fp = fingerprint_device()
+            methods = Planner().plan(fp)
+            self._send(200, json.dumps({
+                "fingerprint": fp.to_dict(),
+                "methods": [m.__dict__ for m in methods],
+                "selectable": [m.capability_id for m in methods if m.selectable()],
+                "text": fp_render(fp) + "\n" + render_plan(methods, fp),
+            }, default=str))
+        elif path == "/api/journal":
+            qs = parse_qs(parsed.query)
+            case_id = qs.get("case", [""])[0]
+            if not case_id:
+                cs = _cases()
+                if cs:
+                    case_id = cs[0].get("case_id", "")
+            if not case_id:
+                self._send(200, json.dumps({"sessions": []}))
+                return
+            case_dir = Path.home() / "cases" / case_id
+            jdir = case_dir / "journal"
+            sessions = []
+            if jdir.is_dir():
+                from ..journal import SessionJournal, verify_journal_file
+                for f in sorted(jdir.glob("S-*.jsonl")):
+                    j = SessionJournal(case_dir, f.stem)
+                    s = j.summary()
+                    s["verify"] = verify_journal_file(f)
+                    s["replay"] = j.replay()
+                    sessions.append(s)
+            self._send(200, json.dumps({"case": case_id,
+                                        "sessions": sessions}, default=str))
         elif path == "/api/tools":
             from .. import forensics
             self._send(200, json.dumps({
@@ -948,13 +982,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"{}" if self.headers.get("Accept", "").startswith("application/json") else b"not found")
 
     def _do_acquire(self, data):
+        from ..journal import new_session
         dest = Path(data["destination"])
         log_path = dest / "acquire.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        jrn = new_session(dest, operator=data.get("operator", "web-studio"))
         with open(log_path, "a", encoding="utf-8") as fh:
             def log(s):
                 fh.write(f"{datetime.now().isoformat()} {s}\n"); fh.flush()
             log("acquire task starting")
+            jrn.emit("AcquisitionStarted", {"method": "logical-suite",
+                                            "destination": str(dest)})
             steps = ["backup", "media", "crash", "diag", "syslog"]
             for step in steps:
                 log(f"step={step} starting")
@@ -1028,9 +1066,15 @@ class Handler(BaseHTTPRequestHandler):
                                     str(backups[0].parent), "-o", str(dest / "report")],
                                    capture_output=True, timeout=600)
                     log("report ready")
+                    jrn.emit("ReportGenerated", {"path": str(dest / "report")})
                 except Exception as exc:
                     log(f"dump exception {exc}")
+                    jrn.failure("ParserFailure", "dump",
+                                "backup parsing failed",
+                                technical_message=str(exc))
             log("acquire task complete")
+            jrn.emit("AcquisitionCompleted", {"destination": str(dest)})
+            jrn.complete({"destination": str(dest)})
 
 
 def main(argv=None):
