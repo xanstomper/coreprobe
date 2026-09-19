@@ -3,6 +3,8 @@
 **An open-source iOS forensic triage + exploit-research workstation — the honest Cellebrite-class alternative.**
 
 - **77 verified public exploit routes** (A4 → A20 Pro, iOS 6 → 27.0) + **36 acquisition-relevant Apple-advisory CVEs** (iOS 26.x/27.x)
+- **Capability TRUTH system**: research status ≠ operational capability — a strict status machine (UNKNOWN → DOCUMENTED → PUBLIC_POC → LAB_REPRODUCED → LAB_VALIDATED → INTEGRATED → REGRESSION_TESTED) with a consistency auditor; only REGRESSION_TESTED capabilities are planner-selectable
+- **Event-sourced case journal**: append-only sessions, permanent EVD-000001+ evidence IDs, custody events, first-class failure records, full case replay
 - **Own BFU stack**: keybag parser, UID-key unwrap, cprotect parsing, AES-CBC sector decryption
 - **Zero-day research program**: DFU USB capture → trace analysis → mutation fuzzing → campaign triage
 - **Court-ready chain of custody**: native-hash manifest + HMAC-SHA256 integrity seal + tamper detection
@@ -34,6 +36,9 @@
 git clone https://github.com/xanstomper/coreprobe && cd coreprobe
 sudo ./install.sh --with-web-service      # + --with-cxx --with-checkm8-tools --with-desktop
 opensleuth doctor                          # workstation readiness check
+opensleuth capabilities --audit            # capability registry consistency audit
+opensleuth fingerprint                     # device fingerprint w/ source+confidence
+opensleuth plan2                           # truth-gated acquisition plan
 opensleuth exposure --chip A13 --ios 26.6.1
 opensleuth autoexploit                     # AXIOM-style: probe then run every applicable
                                            # public route until one succeeds (see below)
@@ -74,6 +79,43 @@ falsely reported as working: a route only counts as a hit when an objective
 state change is observed (PWND marker in USB serial, irecovery env reachable,
 AFC2/SSH mount, or a reachable logical service). Missing tooling is reported
 per-route so it can be installed and the run repeated.
+
+## Capability TRUTH system
+
+CoreProbe never presents a documented exploit as a usable capability. Every
+capability lives in a machine-readable registry (`opensleuth/capabilities.json`)
+with a strict status machine:
+
+```
+UNKNOWN → DOCUMENTED → PUBLIC_POC → LAB_REPRODUCED → LAB_VALIDATED
+        → INTEGRATED → REGRESSION_TESTED          (+ BROKEN / RETIRED)
+```
+
+Only `REGRESSION_TESTED` — adapter exists + validation evidence recorded +
+test fixture — enters the **operational pool** the acquisition planner may
+select. The pool is defensive: even direct status mutation cannot smuggle an
+unevidenced capability in (`opensleuth capabilities --audit` verifies).
+
+Current honest statuses (from the codebase audit): `device-info`,
+`logical-backup`, `backup-parse` operational (fixture-tested); `checkm8-pwn`
+INTEGRATED — real adapter, no recorded hardware validation yet;
+`usbliter8-verify` and the jailbreak-detect family DOCUMENTED (research only:
+the former needs the RP2350 rig, the latter only detects examiner-installed
+agents).
+
+`opensleuth plan2` renders the truth-gated plan (AVAILABLE / VALIDATION
+REQUIRED / RESEARCH ONLY / UNSUPPORTED per capability), and the web studio
+exposes the same via `/api/plan2`.
+
+## Event-sourced case journal
+
+Every acquisition session writes an append-only journal
+(`<case>/journal/S-*.jsonl`): device detections, fingerprints, capability
+assessments, acquisition start/progress/completion/interruption, evidence
+creation (`EVD-000001`… permanent IDs), hashing, custody events, parser
+warnings/failures, reports. Corrections are new events referencing originals;
+history is never rewritten. `/api/journal?case=X` returns per-session
+summaries with structural verification and a full replay.
 
 ## What it can do right now
 
