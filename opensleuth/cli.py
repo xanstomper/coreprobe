@@ -1144,6 +1144,74 @@ def cmd_acquire_plan(args):
         print(_json.dumps([m.__dict__ for m in methods], indent=2, default=str))
 
 
+def cmd_agent(args):
+    """AI agent harness: fully-automatic, examiner-accountable acquisition.
+
+    Deterministic state machine with journal + approval gates; optional LLM
+    advisor is ADVISORY-ONLY (narrative/suggestions, never evidence).
+    """
+    import time as _time
+
+    from .agent import AgentHarness, TERMINAL
+    from .agentllm import default_advisor
+
+    case_dir = Path(args.case).expanduser()
+    case_dir.mkdir(parents=True, exist_ok=True)
+    state_file = case_dir / "agent-state.json"
+
+    def _save(h: AgentHarness) -> None:
+        state_file.write_text(json.dumps(h.status.to_dict(), indent=2,
+                                         default=str), encoding="utf-8")
+
+    if args.action == "status":
+        if state_file.is_file():
+            print(state_file.read_text(encoding="utf-8"))
+        else:
+            print("no agent run in this case yet (start with: "
+                  "opensleuth agent run --case <dir>)")
+        return
+
+    if args.action == "approve":
+        # resume an AWAITING_APPROVAL run and approve it
+        from .agent import AgentStatus
+        if not state_file.is_file():
+            sys.exit("no agent run awaiting approval")
+        st_dict = json.loads(state_file.read_text(encoding="utf-8"))
+        if st_dict.get("state") != "AWAITING_APPROVAL":
+            sys.exit(f"state is {st_dict.get('state')}, not AWAITING_APPROVAL")
+        h = AgentHarness(case_dir, operator=args.operator,
+                         auto_approve=True,
+                         log=lambda m: print(m, flush=True))
+        # fast-forward back to the gate with the recorded device/plan
+        h.status.__dict__.update(st_dict)
+        h.approve(note=args.note or "CLI approve")
+        h.run(max_steps=50)
+        _save(h)
+        print(h.status.summary())
+        return
+
+    # action == run
+    advisor = default_advisor() if args.advisor else None
+    if args.advisor and not advisor.available:
+        print("note: OPENSLEUTH_LLM_API_KEY not set - running without the "
+              "advisory narrative")
+    h = AgentHarness(case_dir, operator=args.operator,
+                     auto_approve=args.yes, log=lambda m: print(m, flush=True))
+    if advisor and advisor.available:
+        h.attach_advisor(advisor)
+        print(f"advisor: {advisor.model} (ADVISORY ONLY - labeled in report)")
+    h.run(max_steps=100)
+    _save(h)
+    print()
+    print(h.status.summary())
+    if h.status.state == "CASE_READY":
+        print(f"\nreport: {h.status.report.get('path')}")
+        print(f"journal replay: opensleuth agent status --case {args.case}")
+    elif h.status.state == "AWAITING_APPROVAL":
+        print("\nawaiting examiner approval - approve with:")
+        print(f"  opensleuth agent approve --case {args.case} --operator '{args.operator}'")
+
+
 def cmd_versions(args):
     """Authoritative public jailbreak status per firmware version."""
     from .versions import render_26, render_27, render_all
@@ -2357,6 +2425,21 @@ def main(argv=None):
     pln.add_argument("--state", default="", help="AFU|BFU|DFU|recovery|absent")
     pln.add_argument("--json", action="store_true")
     pln.set_defaults(fn=cmd_acquire_plan)
+
+    ag = sub.add_parser("agent", help="AI agent harness: automatic, examiner-accountable acquisition pipeline")
+    ag_sub = ag.add_subparsers(dest="action", required=True)
+    agr = ag_sub.add_parser("run", help="run the agent (deterministic pipeline + approval gates)")
+    agr.add_argument("--case", default="~/cases/agent-case", help="case directory")
+    agr.add_argument("--operator", default=os.environ.get("USER", "examiner"))
+    agr.add_argument("--yes", action="store_true", help="auto-approve acquisition routes (records consent)")
+    agr.add_argument("--advisor", action="store_true", help="attach LLM advisory narrative (ADVISORY ONLY)")
+    ags = ag_sub.add_parser("status", help="show last agent state for a case")
+    ags.add_argument("--case", default="~/cases/agent-case")
+    aga = ag_sub.add_parser("approve", help="approve an AWAITING_APPROVAL run and continue")
+    aga.add_argument("--case", default="~/cases/agent-case")
+    aga.add_argument("--operator", default=os.environ.get("USER", "examiner"))
+    aga.add_argument("--note", default="", help="approval note for the journal")
+    ag.set_defaults(fn=cmd_agent)
     ver = sub.add_parser("versions", help="authoritative per-firmware public jailbreak status (iOS 18/26/27, tvOS, bridgeOS)")
     ver.add_argument("ios", nargs="?", default="", help="specific version, e.g. 26.0.1")
     ver.add_argument("--ipados", action="store_true", help="show the iPadOS 26 table")
