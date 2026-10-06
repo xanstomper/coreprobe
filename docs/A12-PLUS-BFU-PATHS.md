@@ -73,3 +73,15 @@ No public A12+ SEP bypass exists. These are instruments for finding
 one — months-to-years of specialized work with no guarantee. What's
 already guaranteed: escrow, AFU routes, encrypted-backup-with-passcode,
 and full post-unlock tooling.
+
+## Path 4 — zero-click entry research (added 2026-10-06)
+
+The catalog now carries the documented zero-click/wild chains (FORCEDENTRY, BLASTPASS,
+Triangulation, KISMET, CVE-2024-23225/23296, CVE-2025-31200/31201, CVE-2024-44308/09).
+Lesson from the public record: every demonstrated passcode-bypass-adjacent primitive on
+A12+ arrived as a zero-click delivery chain (message-daemon + media/font parse surface,
+reachable while locked). That makes locked-state-reachable attack surface a fourth
+research path: enumerate the daemons that accept network-delivered content pre-unlock
+(IMTransferAgent, PassKit, CoreMedia/AppleAVD, CoreText), diff their parsers across
+builds, and fuzz them in BFU state. Tooling exists in-project: firmware extract +
+sepos diff for build deltas, dfufuzz/dfutrace for USB-side, campaign for triage.

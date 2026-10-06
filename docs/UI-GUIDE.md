@@ -9,7 +9,7 @@ status bar (model / AFU-BFU / chip / iOS polled from /api/device).
 | Shortcut | Page |
 |---|---|
 | Ctrl+1 | Dashboard |
-| Ctrl+2 | Exploits (77 routes, filters, disclosure table w/ HIGH-VALUE badges) |
+| Ctrl+2 | Exploits (84 routes, filters, disclosure table w/ HIGH-VALUE badges) |
 | Ctrl+6 | Research (campaigns, leads, attack-surface targets) |
 | Ctrl+7 | BFU Lab (FS intelligence, keybag, escrow) |
 | Ctrl+8 | Evidence (certify create/verify) |
