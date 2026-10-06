@@ -20,8 +20,12 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libimobiledevice-utils libusbmuxd-utils \
-            irecovery libusb-1.0-0-dev g++ cmake sqlite3
+          # libusbmuxd-utils was folded into libusbmuxd-tools on newer runners;
+          # fall back per-package so one rename can't kill the whole install.
+          for pkg in libimobiledevice-utils libusbmuxd-tools libusbmuxd-utils \
+            irecovery libusb-1.0-0-dev g++ cmake sqlite3; do
+            sudo apt-get install -y -qq "$pkg" || echo "skip $pkg (unavailable)"
+          done
 
       - name: Install Python deps
         run: |
