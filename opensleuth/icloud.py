@@ -56,18 +56,18 @@ def acquire(args) -> dict[str, Any]:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    if not getattr(args, "username", None) or not getattr(args, "password", None):
+        return {
+            "ok": False,
+            "error": "Apple ID credentials required (--username --password). "
+                     "Use an account approved under the warrant.",
+        }
     cls = _pyicloud()
     if cls is None:
         return {
             "ok": False,
             "error": "pyicloud not installed. Install: pip install pyicloud "
                      "(requires a 2FA session; see pyicloud docs).",
-        }
-    if not getattr(args, "username", None) or not getattr(args, "password", None):
-        return {
-            "ok": False,
-            "error": "Apple ID credentials required (--username --password). "
-                     "Use an account approved under the warrant.",
         }
 
     api = cls(args.username, args.password)
