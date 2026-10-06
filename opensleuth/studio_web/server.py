@@ -24,6 +24,9 @@ def _run(cmd, timeout=60):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+_LAST_DEV_STATE = {"udid": None, "state": None}
+
+
 def _device():
     """Robust device detection.
 
@@ -39,6 +42,10 @@ def _device():
     st = usb_state()
     devs = st.get("devices", [])
     if not devs:
+        if _LAST_DEV_STATE.get("udid"):
+            _notify("Device Detached", "iOS device was disconnected.", "warning", "DEVICE")
+            _LAST_DEV_STATE["udid"] = None
+            _LAST_DEV_STATE["state"] = None
         return None
     # Prefer a booted 'normal' device for service-layer data; else the first.
     booted = next((d for d in devs if d.get("mode") == "normal"), devs[0])
@@ -72,7 +79,7 @@ def _device():
         state = "AFU" if _paired() else "BFU"
 
     chip = chip_for(pt) or chip_from_serial(serial) or chip_from_irecovery() or ""
-    return {
+    res = {
         "model": KNOWN_DEVICES.get(pt, (pt or product or "Apple device"))[0],
         "product_type": pt or product or "",
         "ios": info.get("ProductVersion", ""),
@@ -85,6 +92,12 @@ def _device():
         "product_id": product_id,
         "pwnd": pwnd,
     }
+    if res["udid"] and (res["udid"] != _LAST_DEV_STATE.get("udid") or res["state"] != _LAST_DEV_STATE.get("state")):
+        title = "Device Connected" if not _LAST_DEV_STATE.get("udid") else f"Device State: {res['state']}"
+        _notify(title, f"{res['model']} ({res['chip'] or 'Apple silicon'}) detected in {res['state']} mode.", "success" if res["state"] == "AFU" else "info", "DEVICE")
+        _LAST_DEV_STATE["udid"] = res["udid"]
+        _LAST_DEV_STATE["state"] = res["state"]
+    return res
 
 
 def _paired():
@@ -266,6 +279,7 @@ def _report(case):
             return {"error": "report not generated: " + reason[0][:200]}
         if not (dest / "report" / "report.html").is_file():
             return {"error": "report not generated (no report.html produced)"}
+        _notify("Report Generated", f"Forensic report created for case {case_id}.", "success", "EVIDENCE")
         return {"ok": True, "report": str(dest / "report" / "report.html")}
     except Exception as exc:
         return {"error": str(exc)}
@@ -314,6 +328,7 @@ def _run_autoexploit(allow_destructive=False):
     AEXPLOIT["running"] = True
     AEXPLOIT["error"] = None
     AEXPLOIT["log"] = []
+    _notify("Auto-Exploiter Started", "Probing attached device and running applicable exploit routes...", "info", "EXPLOIT")
     sz = AEXPLOIT  # noqa: F841  (aliasing keeps closure reads stable)
     try:
         report = auto_exploit(
@@ -321,13 +336,249 @@ def _run_autoexploit(allow_destructive=False):
             route_timeout=280,
             log=_aexploit_log,
         )
-        AEXPLOIT["report"] = render_run(report, to_json=True)
+        rendered = render_run(report, to_json=True)
+        AEXPLOIT["report"] = rendered
+        if isinstance(rendered, dict) and rendered.get("winner"):
+            _notify("Auto-Exploit Hit!", f"Route succeeded: {rendered.get('winner')}", "success", "EXPLOIT")
+        else:
+            _notify("Auto-Exploiter Completed", "No terminal acquisition route succeeded on attached target.", "warning", "EXPLOIT")
     except Exception as exc:  # noqa: BLE001
         AEXPLOIT["error"] = str(exc)
         _aexploit_log(f"auto-exploit aborted: {exc}")
+        _notify("Auto-Exploit Error", f"Execution failed: {exc}", "error", "EXPLOIT")
     finally:
         AEXPLOIT["finished_at"] = datetime.now().isoformat()
         AEXPLOIT["running"] = False
+
+
+# Structured Notification Store
+NOTIFICATIONS = [
+    {
+        "id": 1,
+        "title": "Workstation Online",
+        "message": "CoreProbe Forensic Control Plane and Exploit Engine initialized.",
+        "level": "success",
+        "category": "SYSTEM",
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "iso": datetime.now().isoformat(),
+    }
+]
+
+
+def _notify(title, message, level="info", category="SYSTEM"):
+    now = datetime.now()
+    entry = {
+        "id": len(NOTIFICATIONS) + 1,
+        "title": str(title),
+        "message": str(message),
+        "level": str(level),
+        "category": str(category),
+        "timestamp": now.strftime("%H:%M:%S"),
+        "iso": now.isoformat(),
+    }
+    NOTIFICATIONS.append(entry)
+    if len(NOTIFICATIONS) > 200:
+        del NOTIFICATIONS[:-200]
+    return entry
+
+
+def _get_settings():
+    cfg_dir = Path.home() / ".config" / "opensleuth"
+    cfg_file = cfg_dir / "settings.json"
+    defaults = {
+        "examiner": "Forensic Examiner",
+        "cases_root": str(Path.home() / "cases"),
+        "hash_algo": "Triple-Hash (MD5+SHA256+SHA512)",
+        "auto_dump": True,
+        "auto_report": True,
+        "poll_interval": 4000,
+    }
+    if cfg_file.is_file():
+        try:
+            saved = json.loads(cfg_file.read_text())
+            defaults.update(saved)
+        except Exception:
+            pass
+    return defaults
+
+
+def _save_settings(data):
+    cfg_dir = Path.home() / ".config" / "opensleuth"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg_file = cfg_dir / "settings.json"
+    current = _get_settings()
+    current.update(data)
+    cfg_file.write_text(json.dumps(current, indent=2))
+    _notify("Settings Saved", f"Examiner '{current.get('examiner')}' preferences updated.", "success", "SYSTEM")
+    return current
+
+
+def _execute_single_route(route_name, allow_destructive=False):
+    """Execute or verify preconditions for any single exploit route from the catalog."""
+    from ..exploits import ROUTES, BY_NAME
+    from ..exploitrunner import probe_target, _bin, _strategy_for_route, _EXECUTORS
+
+    r = BY_NAME.get(route_name)
+    if not r:
+        for item in ROUTES:
+            if item.get("name") == route_name:
+                r = item
+                break
+    if not r:
+        return {"ok": False, "status": "unknown_route", "message": f"Route '{route_name}' not found in catalog."}
+
+    tools = r.get("tooling", [])
+    # Three-tier honest deployability:
+    #   _DOCUMENTED = no real public weaponization (no public PoC / CISA /
+    #                 research-only) -> research_only, no deploy
+    #   _ONDEVICE   = layer is kernel/userspace/trollstore/ppl with an
+    #                 app-side agent (Dopamine/kfd/TrollStore/NathanLR/...).
+    #                 Deploy = sideload the app on an unlocked device, then
+    #                 the afu_agent executor verifies via AFC2. The UI labels
+    #                 these SIDELOAD (host tool <= ideal, app not auto-installed
+    #                 by us - that would be fabrication).
+    #   _HOST       = bootrom/sep/bootrom-chain routes run on the host against
+    #                 a DFU/locked device (checkm8/gaster, usbliter8ctl,
+    #                 palera1n, irecovery, ipwndfu, Blackbird/PongoOS).
+    _RO = ("no public poc","no public tooling","research-only",
+           "cisa known exploited","documented only","no public weaponization")
+    _tl = " ".join(str(t) for t in tools).lower()
+    _documented = any(k in _tl for k in _RO)
+    _HOST_BINS = {"gaster","ipwndfu","ipwnder32","palera1n","checkra1n",
+                  "irecovery","usbliter8ctl","picotool","ideviceenterrecovery",
+                  "ideviceinfo","pymobiledevice3","ifuse","ssh","PongoOS",
+                  "restored_external","idevicebackup2"}
+    layer = r.get("layer", "")
+    # HOST tier = the executor runs a real PC-side binary. checkra1n and
+    # palera1n are kernel-layer but are HOST-RUN USB tools (never on-device
+    # apps), so host is keyed on NAMING A HOST BINARY, not on layer alone.
+    def _host_bin_names(tok: str):
+        tl = tok.lower()
+        for b in _HOST_BINS:
+            if b in tl:
+                yield b
+    _host_named = [b for tok in (str(t) for t in tools) for b in _host_bin_names(tok)]
+    _host = bool(_host_named) or layer in ("bootrom","bootrom-chain","sep","iboot")
+    _ondev = (not _host) and (layer in ("kernel","userspace","trollstore","ppl")) and r.get("hardware") == "app"
+    # Which host binaries this route needs (only meaningful for _host routes).
+    def _exec_bins(tok: str):
+        tl2 = tok.lower()
+        for b in _HOST_BINS:
+            if b in tl2:
+                yield b
+    _needed = sorted({b for tok in (str(t) for t in tools) for b in _exec_bins(tok)})
+    _have = [t for t in _needed if _bin(t)]
+    missing_tools = []
+    if _documented:
+        _mode, _deployable = "research_only", False
+    elif _host:
+        _mode = "host"
+        _deployable = bool(_have)  # at least one host executor binary present
+        if _deployable:
+            missing_tools = [t for t in _needed if t not in _have]  # informational
+    elif _ondev:
+        _mode = "sideload"
+        # On-device app routes are DEPLOYABLE via app install on an unlocked
+        # device (afu_agent flow). Host-side we only need a pairing service.
+        _deployable = True
+        missing_tools = [t for t in _needed if t not in _have]
+    else:
+        _mode, _deployable = "research_only", False
+    target = probe_target()
+
+    strat_map = {
+        "checkm8": "checkm8_pwn",
+        "usbliter8": "usbliter8_pwn",
+        "blackbird": "blackbird_sep",
+        "palera1n": "palera1n_jailbreak",
+        "checkra1n": "checkra1n",
+        "limera1n": "a4_bootrom",
+        "pongo_ramdisk": "pongo_ramdisk",
+        "dfu_helper": "dfu_helper",
+    }
+    strat = strat_map.get(route_name) or _strategy_for_route(r)
+    executor = _EXECUTORS.get(strat)
+
+    status_info = {
+        "route": route_name,
+        "layer": r.get("layer", "unknown"),
+        "hardware": r.get("hardware", "none"),
+        "required_chips": r.get("chips", []),
+        "required_tools": tools,
+        "missing_tools": missing_tools,
+        "deployable": _deployable,
+        "deploy_mode": _mode,
+        "strategy": strat,
+        "target_present": target.present,
+        "target_chip": target.chip,
+        "target_state": target.state,
+    }
+
+    if not _deployable:
+        if _documented:
+            msg = f"No installable exploit artifact for {route_name} - DOCUMENTED-only (research lead, no public weaponization)."
+            return {"ok": False, "status": "research_only", "message": msg, "info": status_info}
+        # A real (non-documented) route that lacks its host binary: honest
+        # missing_tools, NOT research_only - it IS exploitable, just not
+        # tooled-up on this host yet.
+        _absent = missing_tools or (_mode == "host" and _needed) or [str(t).split()[0] for t in tools if str(t).split()[0]]
+        msg = f"Exploit tooling not installed for {route_name} (mode={_mode}). Install: {' '.join(dict.fromkeys(_absent))[:120]}"
+        _notify(f"Route: {route_name}", msg, "warning", "EXPLOIT")
+        status_info["missing_tools"] = list(dict.fromkeys(_absent))
+        return {"ok": False, "status": "missing_tools", "message": msg, "info": status_info}
+    # Deployable route: missing_tools is a non-blocking advisory (the executor
+    # falls back between gaster/ipwndfu/palera1n/irecovery). We proceed and
+    # let the executor honestly report run success/failure.
+    if missing_tools:
+        _notify(f"Route: {route_name}", f"Partial tooling: {', '.join(missing_tools)} absent; executor will use present binaries.", "warning", "EXPLOIT")
+
+    if not target.present:
+        msg = f"Preconditions verified for {route_name}. Tooling ({', '.join(tools) or 'native'}) ready on host. No iOS target attached."
+        _notify(f"Route Checked: {route_name}", msg, "info", "EXPLOIT")
+        return {"ok": True, "status": "preconditions_verified", "message": msg, "info": status_info}
+
+    if r.get("chips") and target.chip.upper() not in [c.upper() for c in r.get("chips", [])]:
+        msg = f"Target chip mismatch: {target.chip} attached, but {route_name} requires {', '.join(r['chips'])}."
+        _notify(f"Route: {route_name}", msg, "warning", "EXPLOIT")
+        return {"ok": False, "status": "chip_mismatch", "message": msg, "info": status_info}
+
+    if executor is None:
+        msg = f"No execution handler registered for strategy '{strat}'."
+        _notify(f"Route: {route_name}", msg, "error", "EXPLOIT")
+        return {"ok": False, "status": "no_executor", "message": msg, "info": status_info}
+
+    try:
+        ok, detail, output = executor(target, timeout=120)
+        level = "success" if ok else "warning"
+        msg = f"{route_name}: {detail}"
+        _notify(f"Route Executed: {route_name}", msg, level, "EXPLOIT")
+        return {"ok": ok, "status": "executed", "detail": detail, "output": output, "message": msg, "info": status_info}
+    except Exception as exc:
+        msg = f"Execution error on {route_name}: {exc}"
+        _notify(f"Route Error: {route_name}", msg, "error", "EXPLOIT")
+        return {"ok": False, "status": "error", "message": msg, "info": status_info}
+
+
+def _generate_timeline(case_id):
+    dest = Path.home() / "cases" / case_id
+    if not dest.is_dir():
+        return {"error": "case directory not found"}
+    art = dest / "report" / "artifacts.json"
+    if not art.is_file():
+        _auto_dump(dest)
+    if not art.is_file():
+        return {"error": "artifacts.json not found (run acquisition/dump first)"}
+    out_csv = dest / "report" / "timeline.csv"
+    try:
+        r = subprocess.run([sys.executable, "-m", "opensleuth", "timeline", str(art),
+                            "-o", str(out_csv)], capture_output=True, text=True, timeout=180)
+        if r.returncode != 0:
+            return {"error": f"timeline generator failed: {r.stderr[:200]}"}
+        _notify("Timeline Generated", f"Super-timeline generated for case {case_id}.", "success", "FORENSICS")
+        return {"ok": True, "path": str(out_csv)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
 
 
 def _icon(bundle):
@@ -406,6 +657,7 @@ def _export(case_id):
     try:
         subprocess.run(["tar", "-czf", str(out), "-C", str(dest),
                         "--exclude=backup", "."], capture_output=True, timeout=300)
+        _notify("Export Ready", f"Evidence archive ready for case {case_id} ({out.stat().st_size} bytes).", "info", "EVIDENCE")
         return {"url": "/api/file?path=" + quote(str(out)), "size": out.stat().st_size}
     except Exception as exc:
         return {"error": str(exc)}
@@ -560,6 +812,10 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     payload["recommendation"] = []
             self._send(200, json.dumps(payload, default=str))
+        elif path == "/api/notifications":
+            self._send(200, json.dumps({"notifications": NOTIFICATIONS}))
+        elif path == "/api/settings":
+            self._send(200, json.dumps(_get_settings()))
         elif path == "/api/autoexploit":
             self._send(200, json.dumps({
                 "running": AEXPLOIT["running"],
@@ -978,6 +1234,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(_dump_apps(data)))
         elif parsed.path == "/api/bfu":
             self._send(200, json.dumps(_bfu(data)))
+        elif parsed.path == "/api/notifications/clear":
+            NOTIFICATIONS.clear()
+            self._send(200, b'{"ok":true}')
+        elif parsed.path == "/api/settings":
+            self._send(200, json.dumps(_save_settings(data)))
+        elif parsed.path == "/api/exploit/execute":
+            self._send(200, json.dumps(_execute_single_route(data.get("route", ""), data.get("allow_destructive", False))))
+        elif parsed.path == "/api/timeline":
+            self._send(200, json.dumps(_generate_timeline(data.get("case_id", ""))))
         else:
             self._send(404, b"{}" if self.headers.get("Accept", "").startswith("application/json") else b"not found")
 
@@ -991,6 +1256,7 @@ class Handler(BaseHTTPRequestHandler):
             def log(s):
                 fh.write(f"{datetime.now().isoformat()} {s}\n"); fh.flush()
             log("acquire task starting")
+            _notify("Acquisition Started", f"Logical acquisition started for {dest.name}.", "info", "FORENSICS")
             jrn.emit("AcquisitionStarted", {"method": "logical-suite",
                                             "destination": str(dest)})
             steps = ["backup", "media", "crash", "diag", "syslog"]
@@ -1077,6 +1343,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "backup parsing failed",
                                 technical_message=str(exc))
             log("acquire task complete")
+            _notify("Acquisition Complete", f"Extraction completed successfully to {dest.name}.", "success", "FORENSICS")
             jrn.emit("AcquisitionCompleted", {"destination": str(dest)})
             jrn.complete({"destination": str(dest)})
 

@@ -1,7 +1,7 @@
-/* Forensic Artifact Recovery — single-page application */
+/* CoreProbe — Forensic Artifact Recovery & Exploit Workstation */
 "use strict";
 
-/* ---------------- icons (inline SVG, 1.5px stroke, monochrome) ---------------- */
+/* ---------------- icons (monochrome SVGs) ---------------- */
 const I = d =>
   `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const ICONS = {
@@ -25,14 +25,14 @@ const ICONS = {
   phone: I('<rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/>'),
   tablet: I('<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="10" y1="18" x2="14" y2="18"/>'),
   tools: I('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
-  artifacts: I('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>'),
+  artifacts: I('<path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/>'),
   research: I('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
   bfu: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
   evidence: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>'),
   exploits: I('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>'),
 };
 
-/* ---------------- nav ---------------- */
+/* ---------------- navigation specification ---------------- */
 const NAV = [
   ["dashboard", "Dashboard"], ["devices", "Devices"], ["applications", "Applications"],
   ["browser", "Browser"], ["chats", "Chats"], ["cloud", "Cloud"], ["contacts", "Contacts"],
@@ -40,6 +40,7 @@ const NAV = [
   ["messages", "Messages"], ["files", "Files"], ["forensics", "Forensics"], ["reports", "Reports"],
   ["exploits", "Exploits"], ["research", "Research"], ["bfu", "BFU Lab"], ["evidence", "Evidence"], ["artifacts", "Artifacts"], ["tools", "Tools"], ["settings", "Settings"],
 ];
+
 const SECTION_META = {
   devices: ["Devices", "Physical and logical device data"],
   applications: ["Applications", "Installed apps and app data"],
@@ -53,55 +54,168 @@ const SECTION_META = {
   media: ["Media", "Photos, videos and audio"],
   messages: ["Messages", "SMS, MMS, RCS messages"],
   files: ["Files", "Documents and file system"],
-  forensics: ["Forensics", "Recovered and deleted data"],
-  reports: ["Reports", "Generated reports and exports"],
-  exploits: ["Exploits", "Public iOS exploit catalog and exposure"],
+  forensics: ["Forensics", "Timeline, SQLite & multi-hash analysis"],
+  reports: ["Reports", "CASE/UCO & evidentiary certification"],
+  exploits: ["Exploits", "Public iOS exploit catalog (91 routes)"],
   tools: ["Tools", "Open-source forensic toolchain + install status"],
-  research: ["Research", "Zero-day research: campaigns, DFU traces, leads, patch catalog"],
-  bfu: ["BFU Lab", "Modern-phone BFU: FS intelligence, keybags, decrypt engine"],
-  evidence: ["Evidence", "Chain of custody: certify, verify, integrity seals"],
+  research: ["Research", "Zero-day research: campaigns, traces, leads"],
+  bfu: ["BFU Lab", "Modern-phone BFU: FS intelligence, keybags, decrypt"],
+  evidence: ["Evidence", "Chain of custody: certify, verify, seals"],
   artifacts: ["Artifacts", "Crash logs, wireless, super-timeline"],
-  settings: ["Settings", "Configuration and preferences"],
+  settings: ["Settings", "Configuration and examiner preferences"],
 };
 
-/* ---------------- state ---------------- */
+/* ---------------- global state & cache ---------------- */
 let DEVICE = null, APPS = [], ARTIFACTS = {}, CASES = [], ACTIVE_CASE = null;
 let currentHash = "dashboard", chatSelected = null;
 let notesTimer = null;
+let NOTIFICATIONS_LIST = [];
+let UNREAD_NOTIFS = 0;
+let LAST_DEVICE_UDID = null;
+let LAST_DEVICE_STATE = null;
 
-/* ---------------- api + utils ---------------- */
+// Catalog & Analysis Cache (avoids UI freeze & DOM thrashing)
+const CACHE = {
+  exploits: null,
+  tools: null,
+  doctor: null,
+  stance: null,
+  surface: null,
+  bfu: null,
+  settings: null,
+};
+
+/* ---------------- api & utility helpers ---------------- */
 async function api(path, opts) {
-  const r = await fetch(path, opts);
-  try { return await r.json(); } catch { return {}; }
+  try {
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch (err) {
+    return { error: String(err) };
+  }
 }
+
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]));
 const fmtDate = iso => { if (!iso) return "—"; const d = new Date(iso); return isNaN(d) ? String(iso) : d.toLocaleString(); };
 const fmtBytes = n => n > 1048576 ? (n/1048576).toFixed(1)+" MB" : n > 1024 ? (n/1024).toFixed(1)+" KB" : n+" B";
 
-function toast(msg, kind = "blue") {
-  let t = document.getElementById("toast");
-  if (!t) {
-    t = document.createElement("div");
-    t.id = "toast";
-    t.style.cssText = "position:fixed;bottom:18px;right:310px;z-index:99;padding:8px 14px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid;display:none";
-    document.body.appendChild(t);
-  }
-  const colors = { blue: ["rgba(111,155,209,12)","#6f9bd1","rgba(111,155,209,40)"],
-                   green: ["rgba(76,175,125,12)","#4caf7d","rgba(76,175,125,40)"],
-                   red: ["rgba(217,107,107,12)","#d96b6b","rgba(217,107,107,40)"] };
-  const [bg, fg, bd] = colors[kind] || colors.blue;
-  t.style.cssText += `background:${bg};color:${fg};border-color:${bd}`;
-  t.textContent = msg; t.style.display = "block";
-  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3200);
+/* ---------------- text notifications & activity log ---------------- */
+function notify(title, message, level = "info", category = "SYSTEM") {
+  const now = new Date();
+  const timeStr = now.toTimeString().split(" ")[0];
+  const notif = {
+    id: Date.now() + Math.random(),
+    title: String(title),
+    message: String(message),
+    level: level.toLowerCase(),
+    category: String(category).toUpperCase(),
+    timestamp: timeStr,
+  };
+  NOTIFICATIONS_LIST.unshift(notif);
+  if (NOTIFICATIONS_LIST.length > 100) NOTIFICATIONS_LIST.pop();
+
+  UNREAD_NOTIFS++;
+  updateNotifBadge();
+  renderNotifDrawer();
+  showToast(notif);
 }
 
-/* ---------------- shell ---------------- */
+function showToast(n) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const t = document.createElement("div");
+  t.className = `toast-card ${n.level}`;
+  const badgeMap = { success: "SUCCESS", error: "FAILED", warning: "WARNING", info: "INFO" };
+  const badgeText = badgeMap[n.level] || "SYSTEM";
+
+  t.innerHTML = `
+    <div class="toast-body">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+        <span class="text-tag ${n.level}">${badgeText}</span>
+        <span class="toast-title">${esc(n.title)}</span>
+      </div>
+      <div class="toast-msg">${esc(n.message)}</div>
+    </div>
+    <div class="toast-close" onclick="this.parentElement.remove()">×</div>
+  `;
+  container.appendChild(t);
+  setTimeout(() => { if (t.parentElement) t.remove(); }, 5000);
+}
+
+function toast(msg, kind = "blue") {
+  const levelMap = { green: "success", red: "error", amber: "warning", blue: "info" };
+  const lvl = levelMap[kind] || kind || "info";
+  notify("System Update", msg, lvl, "OPERATOR");
+}
+
+function updateNotifBadge() {
+  const badge = document.getElementById("notif-badge");
+  if (!badge) return;
+  if (UNREAD_NOTIFS > 0) {
+    badge.textContent = UNREAD_NOTIFS > 99 ? "99+" : String(UNREAD_NOTIFS);
+    badge.style.display = "inline-block";
+  } else {
+    badge.style.display = "none";
+  }
+}
+
+function toggleNotifs() {
+  const drawer = document.getElementById("notif-drawer");
+  if (!drawer) return;
+  const isOpen = drawer.style.display === "flex";
+  drawer.style.display = isOpen ? "none" : "flex";
+  if (!isOpen) {
+    UNREAD_NOTIFS = 0;
+    updateNotifBadge();
+    renderNotifDrawer();
+  }
+}
+
+function renderNotifDrawer() {
+  const body = document.getElementById("notif-drawer-body");
+  const countEl = document.getElementById("drawer-notif-count");
+  if (!body) return;
+  if (countEl) countEl.textContent = String(NOTIFICATIONS_LIST.length);
+
+  if (!NOTIFICATIONS_LIST.length) {
+    body.innerHTML = '<div class="empty-state">No recorded activity yet.</div>';
+    return;
+  }
+  body.innerHTML = NOTIFICATIONS_LIST.map(n => `
+    <div class="notif-card">
+      <div class="notif-card-head">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="text-tag ${n.level}">${esc(n.category)}</span>
+          <span class="notif-card-title">${esc(n.title)}</span>
+        </div>
+        <span class="notif-card-time">${esc(n.timestamp)}</span>
+      </div>
+      <div class="notif-card-msg">${esc(n.message)}</div>
+    </div>
+  `).join("");
+}
+
+async function clearAllNotifications() {
+  NOTIFICATIONS_LIST = [];
+  UNREAD_NOTIFS = 0;
+  updateNotifBadge();
+  renderNotifDrawer();
+  await api("/api/notifications/clear", { method: "POST" });
+  toast("Notifications cleared", "blue");
+}
+
+/* ---------------- shell & navigation ---------------- */
 function buildNav() {
   document.getElementById("nav").innerHTML = NAV.map(([id, label]) =>
-    `<div class="nav-item ${id === currentHash ? "active" : ""}" data-nav="${id}">${ICONS[id]}<span>${label}</span><span class="nav-badge" id="badge-${id}"></span></div>`
+    `<div class="nav-item ${id === currentHash ? "active" : ""}" data-nav="${id}">
+      ${ICONS[id]}
+      <span>${label}</span>
+      <span class="nav-badge" id="badge-${id}"></span>
+    </div>`
   ).join("");
   document.querySelectorAll(".nav-item").forEach(n => n.onclick = () => location.hash = n.dataset.nav);
 }
+
 function navCounts() {
   const chatTotal = (ARTIFACTS.messages?.length || 0) + (ARTIFACTS.whatsapp?.length || 0) +
                     (ARTIFACTS.telegram?.length || 0) + (ARTIFACTS.signal?.length || 0);
@@ -118,24 +232,181 @@ function navCounts() {
   };
   NAV.forEach(([id]) => { const b = document.getElementById("badge-" + id); if (b) b.textContent = map[id] || ""; });
 }
+
 function renderCasePanel() {
   const c = ACTIVE_CASE;
   document.getElementById("case-info").innerHTML = c ? `
-    <div class="ci-row"><span class="ci-key">Case Name</span><span class="ci-val">${esc(c.case_id)}</span></div>
-    <div class="ci-row"><span class="ci-key">Description</span><span class="ci-val">${esc(c.description || c.owner || "—")}</span></div>
+    <div class="ci-row"><span class="ci-key">Case ID</span><span class="ci-val mono">${esc(c.case_id)}</span></div>
+    <div class="ci-row"><span class="ci-key">Target/Desc</span><span class="ci-val">${esc(c.description || c.owner || "—")}</span></div>
     <div class="ci-row"><span class="ci-key">Created</span><span class="ci-val">${fmtDate(c.created)}</span></div>
-    <div class="ci-row"><span class="ci-key">Examiner</span><span class="ci-val">${esc(c.examiner || "—")}</span></div>
-    <div class="ci-row"><span class="ci-key">Evidence Items</span><span class="ci-val">${esc(c.evidence_items || "—")}</span></div>
-    <div class="ci-row"><span class="ci-key">Status</span><span class="ci-val"><span class="status-pill amber">In Progress</span></span></div>` :
-    `<div class="empty-state">No case loaded.<br>Use Quick Actions → Open Case.</div>`;
+    <div class="ci-row"><span class="ci-key">Examiner</span><span class="ci-val">${esc(c.examiner || "Forensic Examiner")}</span></div>
+    <div class="ci-row"><span class="ci-key">Evidence</span><span class="ci-val">${esc(c.evidence_items || "1 target")}</span></div>
+    <div class="ci-row"><span class="ci-key">Status</span><span class="ci-val"><span class="status-pill amber">ACTIVE</span></span></div>` :
+    `<div class="empty-state">No case loaded.<br><button class="btn primary" style="margin-top:8px" onclick="openCaseModal()">Open or Create Case</button></div>`;
+
   document.getElementById("case-id").textContent = c ? c.case_id : "—";
   const srcs = [...(c?.evidence_sources || [])];
   if (DEVICE) srcs.push({ name: DEVICE.model, os: "iOS " + DEVICE.ios, live: true });
   document.getElementById("evidence-sources").innerHTML = srcs.length ? srcs.map(s =>
-    `<div class="evidence-src">${ICONS.phone}<span class="src-name">${esc(s.name)}${s.live ? ' <span class="status-pill green" style="margin-left:4px">live</span>' : ""}</span><span class="src-os">${esc(s.os || "")}</span></div>`
-  ).join("") : `<div class="empty-state" style="padding:10px">No evidence sources.</div>`;
+    `<div class="evidence-src">
+      ${ICONS.phone}
+      <span class="src-name">${esc(s.name)}${s.live ? ' <span class="tag-badge green" style="margin-left:4px">LIVE</span>' : ""}</span>
+      <span class="src-os">${esc(s.os || "")}</span>
+    </div>`
+  ).join("") : `<div class="empty-state" style="padding:10px">No evidence sources configured.</div>`;
+
   const notes = document.getElementById("case-notes");
   if (document.activeElement !== notes) notes.value = c?.notes || "";
+}
+
+/* ---------------- global search ---------------- */
+function onGlobalSearch(q) {
+  q = q.trim().toLowerCase();
+  const dropdown = document.getElementById("search-dropdown");
+  if (!dropdown) return;
+  if (!q) {
+    dropdown.style.display = "none";
+    dropdown.innerHTML = "";
+    return;
+  }
+  const results = [];
+  NAV.forEach(([id, label]) => {
+    if (label.toLowerCase().includes(q) || id.includes(q)) {
+      results.push({ label: `View: ${label}`, hint: "Page navigation", action: () => { location.hash = id; dropdown.style.display = "none"; } });
+    }
+  });
+  if (DEVICE && (DEVICE.model.toLowerCase().includes(q) || DEVICE.chip.toLowerCase().includes(q) || DEVICE.udid.toLowerCase().includes(q))) {
+    results.push({ label: `Attached: ${DEVICE.model} (${DEVICE.chip})`, hint: `Device Mode: ${DEVICE.state}`, action: () => { location.hash = "devices"; dropdown.style.display = "none"; } });
+  }
+  (CACHE.exploits?.routes || []).filter(r => r.name.toLowerCase().includes(q) || (r.chips || []).some(c => c.toLowerCase().includes(q))).slice(0, 4).forEach(r => {
+    results.push({ label: `Exploit: ${r.name}`, hint: `Layer: ${r.layer} · Chips: ${r.chips?.join(",")}`, action: () => { location.hash = "exploits"; dropdown.style.display = "none"; } });
+  });
+  (ARTIFACTS.messages || []).filter(m => String(m.text || "").toLowerCase().includes(q)).slice(0, 3).forEach(m => {
+    results.push({ label: `Message: ${m.text.slice(0, 40)}`, hint: `${m.sender || "Unknown"} · ${fmtDate(m.date)}`, action: () => { location.hash = "chats"; dropdown.style.display = "none"; } });
+  });
+
+  if (!results.length) {
+    dropdown.innerHTML = `<div class="empty-state" style="padding:12px">No items match "${esc(q)}"</div>`;
+  } else {
+    dropdown.innerHTML = results.slice(0, 8).map((r, i) => `
+      <div class="search-result-item" data-idx="${i}">
+        <div style="flex:1">
+          <div style="font-weight:600;color:#fff">${esc(r.label)}</div>
+          <div style="font-size:10.5px;color:var(--muted)">${esc(r.hint)}</div>
+        </div>
+        <span class="mono" style="color:var(--faint);font-size:10px">↵</span>
+      </div>
+    `).join("");
+    dropdown.querySelectorAll(".search-result-item").forEach((el, i) => {
+      el.onclick = () => results[i].action();
+    });
+  }
+  dropdown.style.display = "block";
+}
+
+document.addEventListener("click", e => {
+  const dropdown = document.getElementById("search-dropdown");
+  const searchInput = document.getElementById("global-search");
+  if (dropdown && !dropdown.contains(e.target) && e.target !== searchInput) {
+    dropdown.style.display = "none";
+  }
+});
+
+/* ---------------- case switcher modal ---------------- */
+function openCaseModal() {
+  const modal = document.getElementById("case-modal");
+  const select = document.getElementById("case-select-dropdown");
+  if (!modal || !select) return;
+  select.innerHTML = `<option value="">Choose a case (${CASES.length} found)...</option>` +
+    CASES.map(c => `<option value="${esc(c.case_id)}" ${c.case_id === ACTIVE_CASE?.case_id ? "selected" : ""}>${esc(c.case_id)} — ${esc(c.description || c.owner || "Target")} (${fmtDate(c.created)})</option>`).join("");
+  modal.style.display = "flex";
+}
+
+function closeCaseModal() {
+  const modal = document.getElementById("case-modal");
+  if (modal) modal.style.display = "none";
+}
+
+function onCaseSelectChanged(val) {
+  if (!val) return;
+  const match = CASES.find(c => c.case_id === val);
+  if (match) {
+    document.getElementById("new-case-id").value = match.case_id;
+    document.getElementById("new-case-examiner").value = match.examiner || "";
+    document.getElementById("new-case-desc").value = match.description || match.owner || "";
+  }
+}
+
+async function submitCaseModal() {
+  const id = document.getElementById("new-case-id").value.trim();
+  const ex = document.getElementById("new-case-examiner").value.trim();
+  const desc = document.getElementById("new-case-desc").value.trim();
+  if (!id) {
+    toast("Case ID / folder name is required", "red");
+    return;
+  }
+  const payload = {
+    case_id: id,
+    examiner: ex || "Forensic Examiner",
+    description: desc || id,
+    created: new Date().toISOString(),
+  };
+  const r = await api("/api/case", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (r.saved) {
+    ACTIVE_CASE = r.case || payload;
+    closeCaseModal();
+    notify("Case Activated", `Active case switched to ${id}`, "success", "EVIDENCE");
+    renderCasePanel();
+    await refreshCurrentPage();
+  } else {
+    toast((r && r.error) || "Failed to switch case", "red");
+  }
+}
+
+/* ---------------- backup parser modal ---------------- */
+function openParseModal() {
+  const modal = document.getElementById("parse-modal");
+  if (!modal) return;
+  const pathInput = document.getElementById("parse-backup-path");
+  if (pathInput) pathInput.value = ACTIVE_CASE?.destination ? `${ACTIVE_CASE.destination}/backup` : "~/cases/C1/backup";
+  modal.style.display = "flex";
+}
+
+function closeParseModal() {
+  const modal = document.getElementById("parse-modal");
+  if (modal) modal.style.display = "none";
+}
+
+async function submitParseModal() {
+  const p = document.getElementById("parse-backup-path").value.trim();
+  const statusEl = document.getElementById("parse-modal-status");
+  const btn = document.getElementById("parse-modal-submit-btn");
+  if (!p) {
+    toast("Path to backup directory is required", "red");
+    return;
+  }
+  btn.disabled = true;
+  statusEl.innerHTML = `<span class="mono" style="color:var(--accent)">Parsing backup at ${esc(p)} (extracting databases & generating report)...</span>`;
+  notify("Parser Started", `Parsing disk backup image at ${p}`, "info", "FORENSICS");
+
+  const r = await api("/api/parse-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: p }),
+  });
+  btn.disabled = false;
+  if (r.ok) {
+    notify("Parsing Complete", `Artifacts parsed successfully. Report available at ${r.report}`, "success", "FORENSICS");
+    closeParseModal();
+    await refreshCurrentPage();
+  } else {
+    statusEl.innerHTML = `<span class="mono" style="color:var(--red)">Failed: ${esc(r.error || "Manifest.db missing or corrupt")}</span>`;
+    notify("Parser Error", r.error || "Failed to parse backup image", "error", "FORENSICS");
+  }
 }
 
 /* ---------------- dashboard ---------------- */
@@ -144,63 +415,86 @@ function pageDashboard() {
   const artifactCount = Object.entries(ARTIFACTS).filter(([k]) => !["media_index","sqlite_files","timeline_preview","files","device","prefs"].includes(k))
     .reduce((a, [, v]) => a + (Array.isArray(v) ? v.length : 0), 0);
   const caseRows = (CASES.length ? CASES : [
-    {case_id:"2025-0417", owner:"Subject A", evidence_items:"iPhone 14", created:"2025-04-28T10:24", status:"In Progress"},
-    {case_id:"2025-0328", owner:"Investigation", evidence_items:"Samsung S22", created:"2025-04-27T18:12", status:"Completed"},
-  ]).slice(0, 6).map(c => `<tr><td class="mono">${esc(c.case_id)}</td><td>${esc(c.evidence_items || c.owner || "—")}</td>
-    <td class="mono">${fmtDate(c.created)}</td><td><span class="status-pill ${c.status === "Completed" ? "green" : "amber"}">${esc(c.status || "In Progress")}</span></td></tr>`).join("");
+    {case_id:"2026-CASE-01", owner:"Subject A", evidence_items:"iPhone 14 (A15)", created:new Date().toISOString(), status:"In Progress"},
+  ]).slice(0, 6).map(c => `<tr>
+    <td class="mono"><b>${esc(c.case_id)}</b></td>
+    <td>${esc(c.evidence_items || c.owner || "Target")}</td>
+    <td class="mono">${fmtDate(c.created)}</td>
+    <td><span class="status-pill ${c.status === "Completed" ? "green" : "amber"}">${esc(c.status || "ACTIVE")}</span></td>
+  </tr>`).join("");
 
-  const logLines = (ARTIFACTS._log || []).slice(-5).reverse();
-  const logEvents = (logLines.length ? logLines : [
-    DEVICE ? `Device connected: ${DEVICE.model} (${DEVICE.state})` : "Device connected: none",
-    ACTIVE_CASE ? `Case loaded: ${ACTIVE_CASE.case_id}` : "System idle",
-  ]).map((l, i) => `<div class="log-event"><span class="dot ${i === 0 ? "green" : "blue"}"></span><div class="log-body"><div class="log-text">${esc(String(l).slice(0, 90))}</div><div class="log-time">${i === 0 ? "just now" : i + "m ago"}</div></div></div>`).join("");
+  const logLines = (NOTIFICATIONS_LIST.length ? NOTIFICATIONS_LIST.slice(0, 5) : [
+    { title: DEVICE ? `Device Connected: ${DEVICE.model}` : "Device: No device attached", timestamp: "now", level: DEVICE ? "success" : "info", category: "DEVICE" }
+  ]).map(n => `
+    <div class="log-event">
+      <span class="text-tag ${n.level}">${esc(n.category || "LOG")}</span>
+      <div class="log-body">
+        <div class="log-text">${esc(n.title || n.message)}</div>
+        <div class="log-time">${esc(n.timestamp)}</div>
+      </div>
+    </div>
+  `).join("");
 
   const sections = NAV.slice(1).map(([id]) => {
-    const [t, d] = SECTION_META[id];
-    return `<div class="section-card" data-nav="${id}">${ICONS[id]}<div><div class="section-card-title">${t}</div><div class="section-card-desc">${d}</div></div><span class="section-card-chevron">›</span></div>`;
+    const [t, d] = SECTION_META[id] || [id, ""];
+    return `<div class="section-card" data-nav="${id}">
+      ${ICONS[id]}
+      <div>
+        <div class="section-card-title">${t}</div>
+        <div class="section-card-desc">${d}</div>
+      </div>
+      <span class="section-card-chevron">›</span>
+    </div>`;
   }).join("");
 
   return `
     <div class="page-title">Dashboard</div>
-    <div class="page-sub">Overview of your forensic analysis progress and data sources.</div>
+    <div class="page-sub">Overview of your forensic analysis progress, hardware state, and evidence sources.</div>
     <div class="metric-row">
-      ${[["Total Devices", totalDevices, "devices", "devices"],["Artifacts Found", artifactCount.toLocaleString(), "forensics", "forensics"],["Data Categories", 18, "files", "files"],["Cases", CASES.length || 1, "reports", "reports"]]
+      ${[["Total Devices", totalDevices, "devices", "devices"],["Artifacts Found", artifactCount.toLocaleString(), "forensics", "forensics"],["Exploit Routes", "91 Cataloged", "exploits", "exploits"],["Cases", CASES.length || 1, "reports", "reports"]]
         .map(([l, v, ic, nav]) => `<div class="metric-card">${ICONS[ic]}<div class="metric-body"><div class="metric-label">${l}</div><div class="metric-value">${v}</div><div class="metric-link" data-nav="${nav}">View ${l.replace("Total ","").replace(" Found","")} →</div></div></div>`).join("")}
     </div>
     <div class="two-col">
       <div class="panel-card">
-        <div class="panel-card-head">Recent Cases</div>
-        <table class="data"><thead><tr><th>Case Name</th><th>Devices</th><th>Last Modified</th><th>Status</th></tr></thead><tbody>${caseRows}</tbody></table>
+        <div class="panel-card-head">Recent Forensic Cases</div>
+        <table class="data"><thead><tr><th>Case Name</th><th>Target</th><th>Date</th><th>Status</th></tr></thead><tbody>${caseRows}</tbody></table>
       </div>
       <div class="panel-card">
-        <div class="panel-card-head">System Log</div>${logEvents}
+        <div class="panel-card-head">Recent System Activity & Notifications</div>${logLines}
       </div>
     </div>
-    <div class="panel-card"><div class="panel-card-head">All Sections</div>
-      <div style="padding:13px"><div class="section-grid">${sections}</div></div></div>
-    <div class="panel-card"><div class="panel-card-head">Quick Actions</div>
+    <div class="panel-card">
+      <div class="panel-card-head">Quick Actions</div>
       <div class="quick-actions" style="padding:11px 13px">
         <button class="btn primary" style="font-weight:700" onclick="quickAction('autoexploit')">⚡ Auto-Exploit Device</button>
-        <button class="btn primary" onclick="quickAction('add')">Add Device</button>
+        <button class="btn primary" onclick="quickAction('add')">Device Manager</button>
         <button class="btn" onclick="quickAction('parse')">Parse Image</button>
         <button class="btn" onclick="quickAction('report')">Generate Report</button>
         <button class="btn" onclick="quickAction('open')">Open Case</button>
         <button class="btn" onclick="quickAction('export')">Export Evidence</button>
       </div>
+    </div>
+    <div class="panel-card">
+      <div class="panel-card-head">All Workstation Sections</div>
+      <div style="padding:13px"><div class="section-grid">${sections}</div></div>
     </div>`;
 }
 
 /* ---------------- devices ---------------- */
 let activeMode = "AFU";
 const CHIP_RANK_JS = {A7:7,A8:8,A9:9,A10:10,A11:11,A12:12,A13:13,A14:14,A15:15,A16:16,A17:17};
+
 function setMode(m) {
   activeMode = m;
   document.querySelectorAll(".mode-chip").forEach(c => c.classList.toggle("active", c.dataset.mode === m));
   const p = document.getElementById("routes-panel");
   if (p) p.innerHTML = routesHtml();
-  document.getElementById("bfu-actions").style.display = m === "BFU" ? "flex" : "none";
-  document.getElementById("afu-actions").style.display = m === "AFU" ? "flex" : "none";
+  const bfuActions = document.getElementById("bfu-actions");
+  const afuActions = document.getElementById("afu-actions");
+  if (bfuActions) bfuActions.style.display = m === "BFU" ? "flex" : "none";
+  if (afuActions) afuActions.style.display = m === "AFU" ? "flex" : "none";
 }
+
 function routesHtml() {
   const d = DEVICE;
   if (!d) return `<div class="empty-state">Connect a device to see available extraction routes.</div>`;
@@ -210,59 +504,81 @@ function routesHtml() {
     ["checkm8 bootrom (A7–A11 only — BFU partial)", rank <= 11 ? "Available" : "Not possible", rank <= 11 ? "green" : "red"],
     ["jailbreak route (per iOS version, AFU)", activeMode === "AFU" ? "Available" : "Locked", activeMode === "AFU" ? "green" : "amber"],
   ];
-  const pfx = activeMode === "BFU" && rank > 11 ? `<div class="log-event"><span class="dot red"></span><div class="log-body"><div class="log-text">BFU on ${d.chip}: no public exploit exists (as of 2026). One lawful unlock (AFU) restores all routes.</div></div></div>` : "";
+  const pfx = activeMode === "BFU" && rank > 11 ? `
+    <div class="log-event" style="margin-top:8px">
+      <span class="text-tag warning">ATTENTION</span>
+      <div class="log-body"><div class="log-text">BFU on ${d.chip}: no public bootrom exploit exists. One lawful passcode unlock (AFU) restores all logical extraction routes.</div></div>
+    </div>` : "";
   return `<div style="padding:6px 13px 12px">${rows.map(([t, s, k]) => `
     <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-      <span class="status-pill ${k}">${s}</span><span class="mono" style="color:var(--muted);font-size:11.5px">${t}</span></div>`).join("")}${pfx}</div>`;
+      <span class="status-pill ${k}">${s}</span>
+      <span class="mono" style="color:var(--text);font-size:11.5px">${t}</span>
+    </div>`).join("")}${pfx}</div>`;
 }
+
 async function dumpEverything() {
   if (!ACTIVE_CASE) { toast("Open or create a case first", "red"); return; }
   if (activeMode === "AFU") {
-    toast("Full acquisition started — backup, media, crash, diagnostics. Unlock the phone once for the backup step.", "blue");
-    await api("/api/acquire", {method: "POST", body: JSON.stringify({destination: ACTIVE_CASE.destination, case_id: ACTIVE_CASE.case_id})});
-    setTimeout(refreshAll, 6000);
+    notify("Full Acquisition Started", "Backup, media, crash logs, and diagnostics started. Unlock device once for the backup step.", "info", "FORENSICS");
+    await api("/api/acquire", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destination: ACTIVE_CASE.destination, case_id: ACTIVE_CASE.case_id }),
+    });
   } else {
     const out = document.getElementById("bfu-out");
-    out.textContent = "running BFU identity probe (serial/UDID/recovery state)...";
-    toast("BFU probe started — identity-level extraction only", "blue");
-    const r = await api("/api/bfu", {method: "POST", body: JSON.stringify({destination: ACTIVE_CASE.destination || "", chip: DEVICE?.chip})});
-    out.textContent = r.ok ? (r.output || "done") : (r.error || "failed");
+    if (out) out.textContent = "Running BFU identity probe (serial/UDID/recovery state)...";
+    notify("BFU Probe Started", "Identity-level probe running without device passcode.", "info", "FORENSICS");
+    const r = await api("/api/bfu", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destination: ACTIVE_CASE.destination || "", chip: DEVICE?.chip }),
+    });
+    if (out) out.textContent = r.ok ? (r.output || "BFU extraction complete.") : (r.error || "BFU probe failed");
+    notify(r.ok ? "BFU Probe Complete" : "BFU Probe Failed", r.ok ? "Identity data pulled." : (r.error || "Failed"), r.ok ? "success" : "error", "FORENSICS");
   }
 }
+
 function pageDevices() {
   const d = DEVICE;
   const rows = d ? [[d.model, "Apple iOS", d.ios + " (" + d.build + ")", "Logical" + (d.state === "BFU" ? " (gated)" : ""), d.state, "now"]]
-    : [["No device connected", "—", "—", "—", "—", "—"]];
+    : [["No device connected", "—", "—", "—", "DISCONNECTED", "—"]];
   return `
     <div class="page-title">Devices</div>
-    <div class="page-sub">Device detection, acquisition mode (AFU/BFU), and public extraction routes.</div>
+    <div class="page-sub">Hardware detection, acquisition mode (AFU/BFU), and exploit routes.</div>
     <div class="quick-actions">
-      <span class="mode-chip ${activeMode === "AFU" ? "active" : ""}" data-mode="AFU" onclick="setMode('AFU')">AFU — after first unlock</span>
-      <span class="mode-chip ${activeMode === "BFU" ? "active" : ""}" data-mode="BFU" onclick="setMode('BFU')">BFU — before first unlock</span>
-      <span style="align-self:center" class="mono">detected: ${d ? esc(d.state) : "none"}</span>
+      <span class="mode-chip ${activeMode === "AFU" ? "active" : ""}" data-mode="AFU" onclick="setMode('AFU')">AFU — After First Unlock</span>
+      <span class="mode-chip ${activeMode === "BFU" ? "active" : ""}" data-mode="BFU" onclick="setMode('BFU')">BFU — Before First Unlock</span>
+      <span style="align-self:center;margin-left:auto" class="mono">
+        ${d ? `<span class="status-pill ${d.state === "AFU" ? "green" : "amber"}">${d.state}</span> ${esc(d.model)} (${esc(d.chip)})` : '<span class="status-pill gray">NO DEVICE</span>'}
+      </span>
     </div>
     <div class="quick-actions">
       <div style="display:flex;gap:9px" id="afu-actions">
-        <button class="btn primary" onclick="dumpEverything()" ${!d || d.state !== "AFU" ? "disabled" : ""}>Dump everything</button>
-        <button class="btn" onclick="refreshAll()">Refresh</button>
+        <button class="btn primary" onclick="dumpEverything()" ${!d || d.state !== "AFU" ? "disabled" : ""}>Dump Everything (Logical Suite)</button>
+        <button class="btn" onclick="refreshCurrentPage()">Refresh Detection</button>
       </div>
-      <div style="display:flex;gap:9px" id="bfu-actions">
-        <button class="btn primary" onclick="dumpEverything()" ${!d ? "disabled" : ""}>Run BFU probe</button>
+      <div style="display:flex;gap:9px" id="bfu-actions" style="display:none">
+        <button class="btn primary" onclick="dumpEverything()" ${!d ? "disabled" : ""}>Run BFU Identity Probe</button>
+        <button class="btn" onclick="location.hash='bfu'">Open Modern BFU Lab →</button>
       </div>
     </div>
     <div class="two-col">
-      <div class="panel-card"><div class="panel-card-head">Routes & Exploits — public capability</div>
+      <div class="panel-card">
+        <div class="panel-card-head">Routes & Exploits — Public Capability</div>
         <div id="routes-panel">${routesHtml()}</div>
       </div>
       <div>
-        <div class="panel-card"><div class="panel-card-head">Acquisition Mode</div>
-          <div class="empty-state" style="text-align:left;padding:13px">
-            <b>AFU</b> — device was unlocked since boot: full logical acquisition (backup, keychain via password, media, crash, diagnostics, app containers).<br><br>
-            <b>BFU</b> — never unlocked since boot: identity-level data only on ${d ? d.chip : "modern"} chips; checkm8 bootrom route applies to A7–A11 hardware.
+        <div class="panel-card">
+          <div class="panel-card-head">Acquisition Mode Guidance</div>
+          <div style="text-align:left;padding:13px;font-size:12px;line-height:1.5;color:var(--muted)">
+            <b style="color:#fff">AFU (After First Unlock)</b> — device was unlocked with passcode since boot: full logical acquisition (backups, decrypted media, crash logs, diagnostics, app containers).<br><br>
+            <b style="color:#fff">BFU (Before First Unlock)</b> — never unlocked since boot: class keys locked by SEP; identity-level data only on modern chips (A12+); checkm8 bootrom route applies to A7–A11 hardware.
           </div>
         </div>
-        <div class="panel-card"><div class="panel-card-head">BFU Probe Output</div>
-          <div class="mono" id="bfu-out" style="padding:10px 13px;white-space:pre-wrap;font-size:11px;max-height:170px;overflow:auto">Run the BFU probe to collect serial, UDID, recovery state.</div>
+        <div class="panel-card">
+          <div class="panel-card-head">BFU Probe Output</div>
+          <div class="mono" id="bfu-out" style="padding:10px 13px;white-space:pre-wrap;font-size:11px;max-height:170px;overflow:auto">Run the BFU probe to collect serial, UDID, and recovery state without a passcode.</div>
         </div>
       </div>
     </div>
@@ -270,54 +586,16 @@ function pageDevices() {
       <table class="data"><thead><tr><th>Device</th><th>Platform</th><th>OS</th><th>Acquisition</th><th>Status</th><th>Last Activity</th></tr></thead>
       <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td>${i === 4 && c !== "—" ? `<span class="status-pill ${c === "AFU" ? "green" : c === "BFU" ? "amber" : "gray"}">${c}</span>` : esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>
     </div>
-    ${d ? `<div class="panel-card"><div class="panel-card-head">Device Detail — ${esc(d.model)}</div>
+    ${d ? `<div class="panel-card"><div class="panel-card-head">Hardware & Identity Detail — ${esc(d.model)}</div>
       <div class="form-grid">
         <div class="form-field"><span class="form-label">Product Type</span><span class="mono">${esc(d.product_type)}</span></div>
         <div class="form-field"><span class="form-label">UDID</span><span class="mono">${esc(d.udid)}</span></div>
-        <div class="form-field"><span class="form-label">Chip</span><span class="mono">${esc(d.chip)}</span></div>
-        <div class="form-field"><span class="form-label">State</span><span class="mono">${esc(d.state)}</span></div>
+        <div class="form-field"><span class="form-label">Silicon / Chip</span><span class="mono">${esc(d.chip)}</span></div>
+        <div class="form-field"><span class="form-label">Execution State</span><span class="mono">${esc(d.state)}</span></div>
       </div></div>` : ""}`;
 }
 
 /* ---------------- applications ---------------- */
-let iconDone = 0, iconWarmed = false;
-const ICON_READY = new Set();
-async function warmIcons() {
-  if (iconWarmed) return;
-  iconWarmed = true;
-  await api("/api/icons-warm", {method: "POST", body: "{}"});
-  const t = setInterval(async () => {
-    const st = await api("/api/icons-status");
-    if ((st.queue || []).length) for (const b of st.queue.slice(0, st.done)) ICON_READY.add(b);
-    if (st.done !== iconDone) {
-      iconDone = st.done;
-      if (currentHash === "applications") render();
-    }
-    if (st.total && st.done + st.failed >= st.total) {
-      clearInterval(t);
-      if (currentHash === "applications") render();
-    }
-  }, 2500);
-}
-function detectionBanner() {
-  const b = ARTIFACTS;
-  const parts = [];
-  if (DEVICE) parts.push(`device: <b>${esc(DEVICE.model)}</b> (${esc(DEVICE.state)})`);
-  parts.push(`applications: ${APPS.length}`);
-  parts.push(`media: ${b.media_index?.length || 0}`);
-  if (b.crash_count) parts.push(`crash logs: ${b.crash_count}`);
-  if (b.info_files?.length) parts.push(`diagnostics: ${b.info_files.length}`);
-  parts.push(b.backup_present
-    ? `<span class="status-pill green">backup extracted</span>`
-    : `<span class="status-pill amber">backup pending — unlock device once</span>`);
-  return `<div class="panel-card" style="padding:8px 13px;margin-bottom:12px;display:flex;gap:9px;flex-wrap:wrap;align-items:center">
-    <span class="status-pill blue">Auto-detected</span>${parts.join('<span style="color:var(--border2)">|</span>')}</div>`;
-}
-const appTile = name => {
-  const hue = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
-  const initials = name.split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase() || name.slice(0, 2).toUpperCase();
-  return `<span style="width:22px;height:22px;border-radius:5px;background:hsl(${hue},30%,32%);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0">${initials}</span>`;
-};
 let coreSelectedApps = new Set();
 function selAllApps(v) {
   document.querySelectorAll(".app-sel").forEach(c => c.checked = v);
@@ -334,101 +612,101 @@ function syncAppSelection() {
 async function dumpSelectedApps() {
   if (!coreSelectedApps.size || !ACTIVE_CASE) { toast("Select apps and open a case first", "red"); return; }
   const out = document.getElementById("app-dump-status");
-  out.textContent = "dumping " + coreSelectedApps.size + " app container(s)...";
-  const r = await api("/api/dump-apps", {method: "POST", body: JSON.stringify({destination: ACTIVE_CASE.destination, apps: [...coreSelectedApps]})});
-  out.textContent = r.ok ? "done — containers in " + esc(ACTIVE_CASE.case_id) + "/appdata/" : (r.error || "failed");
-  toast(r.ok ? "App dump complete" : (r.error || "dump failed"), r.ok ? "green" : "red");
-}
-function pageApplications() {
-  const dbMap = {};
-  (ARTIFACTS.app_databases || []).forEach(db => {
-    const m = db.domain?.match(/^AppDomain-(.+)$/);
-    if (m) dbMap[m[1]] = (dbMap[m[1]] || 0) + 1;
+  if (out) out.textContent = "dumping " + coreSelectedApps.size + " app container(s)...";
+  notify("Container Extraction", `Dumping containers for ${coreSelectedApps.size} applications...`, "info", "FORENSICS");
+  const r = await api("/api/dump-apps", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ destination: ACTIVE_CASE.destination, apps: [...coreSelectedApps] }),
   });
-  const rows = APPS.length ? APPS.map(a => {
-    const cached = ICON_READY.has(a.bundle);
-    const iconSrc = cached ? `/api/icon/${encodeURIComponent(a.bundle)}` : null;
-    return `<tr>
+  if (out) out.textContent = r.ok ? "done — containers in appdata/" : (r.error || "failed");
+  notify(r.ok ? "App Dump Complete" : "App Dump Failed", r.ok ? "Containers extracted." : (r.error || "Extraction failed"), r.ok ? "success" : "error", "FORENSICS");
+}
+
+function pageApplications() {
+  const rows = APPS.length ? APPS.map(a => `
+    <tr>
       <td style="width:30px;text-align:center"><input type="checkbox" class="app-sel" data-b="${esc(a.bundle)}" onchange="syncAppSelection()"></td>
-      <td><div style="display:flex;align-items:center;gap:9px">
-        ${appTile(esc(a.name))}
-        ${iconSrc ? `<img src="${iconSrc}" width="22" height="22" style="border-radius:5px" onerror="this.remove()">` : ""}
-        <span>${esc(a.name)}</span></div></td>
-      <td class="mono">${esc(a.bundle)}</td><td class="mono">${esc(a.version)}</td>
-      <td>User</td><td class="num">${dbMap[a.bundle] || 0}</td><td class="mono">—</td></tr>`;
-  }).join("")
-    : `<tr><td colspan="7" class="empty-state">Connect a device to enumerate installed applications.</td></tr>`;
+      <td><b>${esc(a.name)}</b></td>
+      <td class="mono">${esc(a.bundle)}</td>
+      <td class="mono">${esc(a.version || "—")}</td>
+      <td>User Application</td>
+      <td class="mono">—</td>
+    </tr>
+  `).join("") : `<tr><td colspan="6" class="empty-state">Connect a device to enumerate installed user applications.</td></tr>`;
+
   return `
     <div class="page-title">Applications</div>
-    <div class="page-sub">Installed apps and app data artifacts. Select apps, then dump their containers.</div>
+    <div class="page-sub">Installed iOS applications and container artifacts. Select apps to dump app sandbox databases.</div>
     <div class="quick-actions">
-      <button class="btn primary" onclick="selAllApps(true)">Select all</button>
-      <button class="btn" onclick="selAllApps(false)">Select none</button>
-      <button class="btn" id="dump-selected" disabled onclick="dumpSelectedApps()">Dump selected</button>
+      <button class="btn primary" onclick="selAllApps(true)">Select All</button>
+      <button class="btn" onclick="selAllApps(false)">Select None</button>
+      <button class="btn" id="dump-selected" disabled onclick="dumpSelectedApps()">Dump Selected Containers</button>
       <span class="mono" id="sel-count" style="align-self:center">0 selected</span>
       <span class="mono" style="align-self:center;color:var(--faint)" id="app-dump-status"></span>
-      <span style="margin-left:auto" class="mono">${APPS.length} applications</span>
+      <span style="margin-left:auto" class="mono">${APPS.length} applications indexed</span>
     </div>
     <div class="panel-card">
       <div class="filter-bar">
-        <input class="form-input" placeholder="Search name or package..." style="width:240px" oninput="filterTable('app-table', this.value)">
+        <input class="form-input" placeholder="Search application name or package..." style="width:280px" oninput="filterTable('app-table', this.value)">
         <span class="status-pill gray">auto-detected · ${APPS.length} apps</span>
       </div>
-      <table class="data" id="app-table"><thead><tr><th style="width:30px"></th><th>Application</th><th>Package</th><th>Version</th><th>Category</th><th>Artifacts</th><th>Last Activity</th></tr></thead>
-      <tbody>${rows}</tbody></table>
+      <table class="data" id="app-table">
+        <thead><tr><th style="width:30px"></th><th>Application</th><th>Bundle ID</th><th>Version</th><th>Type</th><th>Data Containers</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>`;
 }
 
-/* ---------------- browser (working subnav) ---------------- */
+/* ---------------- detection banner ---------------- */
+function detectionBanner() {
+  const b = ARTIFACTS;
+  const parts = [];
+  if (DEVICE) parts.push(`device: <b>${esc(DEVICE.model)}</b> (${esc(DEVICE.state)})`);
+  parts.push(`apps: ${APPS.length}`);
+  parts.push(`media: ${b.media_index?.length || 0}`);
+  if (b.crash_count) parts.push(`crash logs: ${b.crash_count}`);
+  parts.push(b.backup_present
+    ? `<span class="status-pill green">BACKUP EXTRACTED</span>`
+    : `<span class="status-pill amber">BACKUP PENDING</span>`);
+  return `<div class="panel-card" style="padding:9px 14px;margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <span class="text-tag info">AUTO-DETECT</span>${parts.join('<span style="color:var(--border2)">|</span>')}
+  </div>`;
+}
+
+/* ---------------- browser ---------------- */
 function pageBrowser() {
   const tabs = [
     ["History", (ARTIFACTS.history || []).map(h => [h.title || h.url, h.url, fmtDate(h.date)])],
     ["Bookmarks", (ARTIFACTS.bookmarks || []).map(b => [b.title, b.url, fmtDate(b.modified)])],
-    ["Downloads", []], ["Cookies", []], ["Cache", []], ["Saved data", []], ["Search queries", []],
   ];
   return `
-    <div class="page-title">Browser</div><div class="page-sub">Web history, bookmarks, cache.</div>
+    <div class="page-title">Browser</div><div class="page-sub">Web history, bookmarks, and search queries extracted from Safari.</div>
     <div class="panel-card">
       <div class="subnav">${tabs.map(([t], i) => `<span class="subnav-item ${i === 0 ? "active" : ""}" onclick="switchTab(this, 'btab', ${i})">${t}</span>`).join("")}</div>
       ${tabs.map(([t, rows], i) => `<div class="btab" id="btab-${i}" style="display:${i === 0 ? "block" : "none"}">
-        <table class="data"><thead><tr><th>Title</th><th>URL</th><th>Date</th></tr></thead>
-        <tbody>${rows.map(r => `<tr><td>${esc(r[0])}</td><td class="mono">${esc(r[1])}</td><td class="mono">${esc(r[2])}</td></tr>`).join("") || `<tr><td colspan="3" class="empty-state">No ${t.toLowerCase()} artifacts in the current extraction.</td></tr>`}</tbody></table></div>`).join("")}
+        <table class="data"><thead><tr><th>Title</th><th>URL</th><th>Timestamp</th></tr></thead>
+        <tbody>${rows.map(r => `<tr><td>${esc(r[0])}</td><td class="mono">${esc(r[1])}</td><td class="mono">${esc(r[2])}</td></tr>`).join("") || `<tr><td colspan="3" class="empty-state">No ${t.toLowerCase()} artifacts in current extraction.</td></tr>`}</tbody></table></div>`).join("")}
     </div>`;
 }
+
 function switchTab(el, prefix, i) {
   el.parentElement.querySelectorAll(".subnav-item").forEach(s => s.classList.remove("active"));
   el.classList.add("active");
-  for (let k = 0; k < 10; k++) {
+  for (let k = 0; k < 12; k++) {
     const p = document.getElementById(`${prefix}-${k}`);
     if (p) p.style.display = k === i ? "block" : "none";
   }
 }
 
-/* ---------------- chats / messages ---------------- */
+/* ---------------- chats & messages ---------------- */
 let chatServiceFilter = "all";
-
 function _allChats() {
   const all = [];
-  (ARTIFACTS.messages || []).forEach(m => all.push({
-    ...m,
-    service: m.service || "SMS/iMessage",
-    source_db: "sms.db"
-  }));
-  (ARTIFACTS.whatsapp || []).forEach(m => all.push({
-    ...m,
-    service: "WhatsApp",
-    source_db: "ChatStorage.sqlite"
-  }));
-  (ARTIFACTS.telegram || []).forEach(m => all.push({
-    ...m,
-    service: "Telegram",
-    source_db: "tgdata.db"
-  }));
-  (ARTIFACTS.signal || []).forEach(m => all.push({
-    ...m,
-    service: "Signal",
-    source_db: "Signal.sqlite"
-  }));
+  (ARTIFACTS.messages || []).forEach(m => all.push({ ...m, service: m.service || "SMS/iMessage", source_db: "sms.db" }));
+  (ARTIFACTS.whatsapp || []).forEach(m => all.push({ ...m, service: "WhatsApp", source_db: "ChatStorage.sqlite" }));
+  (ARTIFACTS.telegram || []).forEach(m => all.push({ ...m, service: "Telegram", source_db: "tgdata.db" }));
+  (ARTIFACTS.signal || []).forEach(m => all.push({ ...m, service: "Signal", source_db: "Signal.sqlite" }));
   return all;
 }
 
@@ -441,13 +719,10 @@ function selectChatFilter(svc) {
 function pageChats() {
   const all = _allChats();
   if (!all.length) {
-    return emptyPage("Chats", "Chat apps and conversations.",
-      "No chat artifacts yet. Run an acquisition with backup or parse ChatStorage.sqlite / tgdata.db / sms.db to populate conversations.");
+    return emptyPage("Chats", "Chat applications and conversations.",
+      "No chat artifacts in current extraction. Run an acquisition or parse a backup directory containing sms.db, ChatStorage.sqlite, or tgdata.db.");
   }
-  const filtered = chatServiceFilter === "all"
-    ? all
-    : all.filter(m => (m.service || "").toLowerCase().includes(chatServiceFilter));
-
+  const filtered = chatServiceFilter === "all" ? all : all.filter(m => (m.service || "").toLowerCase().includes(chatServiceFilter));
   const chats = {};
   filtered.forEach(m => {
     const k = m.chat || m.sender || "Unknown";
@@ -462,13 +737,6 @@ function pageChats() {
       <div class="bubble-time">${esc(m.sender || "")} · ${fmtDate(m.date)} · <span class="mono">${esc(m.service || "")}</span></div>
     </div>`).join("");
 
-  const srvBadge = srv => {
-    const s = (srv || "").toLowerCase();
-    const cls = s.includes("whatsapp") ? "green" : s.includes("telegram") ? "blue" : s.includes("signal") ? "cyan" : "gray";
-    return `<span class="status-pill ${cls}" style="font-size:9.5px;padding:0 4px;margin-left:4px">${esc(srv || "Chat")}</span>`;
-  };
-
-  const selItem = chats[sel]?.[0];
   const services = ["all", "whatsapp", "telegram", "signal", "sms"];
   const counts = {
     all: all.length,
@@ -480,7 +748,7 @@ function pageChats() {
 
   return `
     <div class="page-title">Chats & Messaging Intelligence</div>
-    <div class="page-sub">Conversation analysis across WhatsApp, Telegram, Signal, and SMS/iMessage.</div>
+    <div class="page-sub">Conversation forensics across WhatsApp, Telegram, Signal, and SMS/iMessage.</div>
     <div class="filter-bar" style="margin-bottom:12px;gap:6px">
       ${services.map(s => `
         <button class="btn ${chatServiceFilter === s ? "primary" : ""}" onclick="selectChatFilter('${s}')">
@@ -491,17 +759,16 @@ function pageChats() {
       <div class="chat-list">
         ${keys.map(k => `
           <div class="chat-item ${k === sel ? "active" : ""}" onclick="selectChat('${esc(k).replace(/'/g, "\\'")}')">
-            <div class="chat-name">${esc(k)} ${srvBadge(chats[k][0]?.service)}</div>
+            <div class="chat-name">${esc(k)} <span class="status-pill gray" style="font-size:9px">${esc(chats[k][0]?.service || "Chat")}</span></div>
             <div class="chat-preview">${esc((chats[k].slice(-1)[0]?.text || "").slice(0, 40))}</div>
-          </div>`).join("") || '<div class="empty-state">No conversations for this filter.</div>'}
+          </div>`).join("") || '<div class="empty-state">No conversations match filter.</div>'}
       </div>
       <div class="chat-thread">${thread || '<div class="empty-state">No messages</div>'}</div>
       <div class="chat-meta">
-        <div class="meta-row"><div class="meta-key">Conversation</div>${esc(sel || "—")}</div>
+        <div class="meta-row"><div class="meta-key">Conversation</div><b>${esc(sel || "—")}</b></div>
         <div class="meta-row"><div class="meta-key">Messages</div>${chats[sel]?.length || 0}</div>
-        <div class="meta-row"><div class="meta-key">Service</div>${esc(selItem?.service || "—")}</div>
-        <div class="meta-row"><div class="meta-key">Source DB</div><span class="mono">${esc(selItem?.source_db || "sms.db")}</span></div>
-        ${selItem?.chat_jid ? `<div class="meta-row"><div class="meta-key">Identifier / JID</div><span class="mono">${esc(selItem.chat_jid)}</span></div>` : ""}
+        <div class="meta-row"><div class="meta-key">Service</div>${esc(chats[sel]?.[0]?.service || "—")}</div>
+        <div class="meta-row"><div class="meta-key">Database</div><span class="mono">${esc(chats[sel]?.[0]?.source_db || "sms.db")}</span></div>
       </div>
     </div>`;
 }
@@ -512,169 +779,126 @@ function pageMessages() {
   const rows = all.map(m => `
     <tr>
       <td class="mono">${fmtDate(m.date)}</td>
-      <td>${esc(m.chat || m.sender || "")}</td>
+      <td><b>${esc(m.chat || m.sender || "")}</b></td>
       <td>${m.from_me ? "Outgoing" : "Incoming"}</td>
-      <td><span class="status-pill ${String(m.service).toLowerCase().includes("whatsapp") ? "green" : String(m.service).toLowerCase().includes("telegram") ? "blue" : String(m.service).toLowerCase().includes("signal") ? "cyan" : "gray"}">${esc(m.service || "SMS")}</span></td>
+      <td><span class="status-pill ${String(m.service).toLowerCase().includes("whatsapp") ? "green" : String(m.service).toLowerCase().includes("telegram") ? "blue" : "gray"}">${esc(m.service || "SMS")}</span></td>
       <td>${esc(m.text || "(attachment)")}</td>
-      <td>${esc((m.attachments || []).join(", ") || "—")}</td>
       <td class="mono">${esc(m.source_db || "sms.db")}</td>
-    </tr>`).join("")
-    || `<tr><td colspan="7" class="empty-state">No message artifacts. Run an acquisition or parse chat databases first.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="6" class="empty-state">No message artifacts extracted.</td></tr>`;
+
   return `
-    <div class="page-title">Messages</div><div class="page-sub">SMS, MMS, WhatsApp, Telegram, and Signal messages.</div>
+    <div class="page-title">Messages</div><div class="page-sub">Searchable message log from SMS, MMS, WhatsApp, Telegram, and Signal.</div>
     <div class="panel-card">
       <div class="filter-bar">
-        <input class="form-input" placeholder="Search messages..." style="width:260px" oninput="filterTable('msg-table', this.value)">
+        <input class="form-input" placeholder="Search message text, sender, or chat..." style="width:280px" oninput="filterTable('msg-table', this.value)">
         <span class="mono" style="margin-left:auto">${all.length} messages indexed</span>
       </div>
       <table class="data" id="msg-table">
-        <thead><tr><th>Timestamp</th><th>Chat</th><th>Direction</th><th>Service</th><th>Text</th><th>Attachments</th><th>Source</th></tr></thead>
+        <thead><tr><th>Timestamp</th><th>Participant</th><th>Direction</th><th>Service</th><th>Message Body</th><th>Source Database</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
 }
 
-/* ---------------- contacts / calls / calendars ---------------- */
+/* ---------------- contacts & calls & calendars ---------------- */
 function pageContacts() {
-  const rows = (ARTIFACTS.contacts || []).map(c => `<tr><td>${esc(c.name)}</td><td class="mono">${esc((c.phones || []).join(", ") || "—")}</td><td>${esc((c.emails || []).join(", ") || "—")}</td><td>AddressBook</td><td class="mono">${fmtDate(c.created)}</td><td class="mono">${fmtDate(c.modified)}</td></tr>`).join("")
-    || `<tr><td colspan="6" class="empty-state">No contact artifacts.</td></tr>`;
-  return tablePage("Contacts", "Contact lists and details.", ["Name","Phone","Email","Source","First Seen","Last Seen"], rows);
+  const rows = (ARTIFACTS.contacts || []).map(c => `<tr>
+    <td><b>${esc(c.name)}</b></td>
+    <td class="mono">${esc((c.phones || []).join(", ") || "—")}</td>
+    <td>${esc((c.emails || []).join(", ") || "—")}</td>
+    <td>AddressBook.sqlitedb</td>
+    <td class="mono">${fmtDate(c.modified)}</td>
+  </tr>`).join("") || `<tr><td colspan="5" class="empty-state">No contacts extracted.</td></tr>`;
+  return tablePage("Contacts", "Extracted address book contacts and identities.", ["Name","Phone","Email","Source","Last Modified"], rows);
 }
+
 function pageCalls() {
-  const rows = (ARTIFACTS.calls || []).map(c => `<tr><td>${esc(c.phone || "")}</td><td class="mono">${esc(c.phone || "")}</td><td>${esc(c.type || c.direction || "")}</td><td class="num">${c.duration_seconds || 0}s</td><td class="mono">${fmtDate(c.date)}</td><td><span class="mono">CallHistory.storedata</span></td></tr>`).join("")
-    || `<tr><td colspan="6" class="empty-state">No call artifacts.</td></tr>`;
-  return tablePage("Calls", "Call logs and communications.", ["Contact","Number","Type","Duration","Timestamp","Source"], rows);
+  const rows = (ARTIFACTS.calls || []).map(c => `<tr>
+    <td class="mono"><b>${esc(c.phone || "")}</b></td>
+    <td>${esc(c.type || c.direction || "Call")}</td>
+    <td class="num">${c.duration_seconds || 0}s</td>
+    <td class="mono">${fmtDate(c.date)}</td>
+    <td class="mono">CallHistory.storedata</td>
+  </tr>`).join("") || `<tr><td colspan="5" class="empty-state">No call logs extracted.</td></tr>`;
+  return tablePage("Calls", "Call records and duration history.", ["Number/Contact","Direction","Duration","Timestamp","Source Database"], rows);
 }
+
 function pageCalendars() {
-  return emptyPage("Calendars", "Calendar events and invites.", "No calendar artifacts in the current extraction. Calendar parsing is on the roadmap.");
-}
-
-/* ---------------- cloud / location ---------------- */
-async function addCloudSource() {
-  const name = prompt("Source name (e.g. Subject iCloud):");
-  if (!name) return;
-  const os = prompt("Provider/OS (e.g. iCloud iOS 17):", "iCloud") || "iCloud";
-  await api("/api/case", {method: "POST", body: JSON.stringify({
-    case_id: ACTIVE_CASE?.case_id || "default", destination: ACTIVE_CASE?.destination,
-    add_evidence_source: {name, os}})});
-  toast("Cloud source added", "green"); refreshAll();
-}
-function pageCloud() {
-  const srcs = ACTIVE_CASE?.evidence_sources || [];
-  const rows = srcs.map(s => `<tr><td class="mono">${esc(s.name)}</td><td>${esc(s.os || "Cloud")}</td><td>—</td><td><span class="status-pill gray">Not synced</span></td><td class="num">0</td><td class="mono">—</td></tr>`).join("");
-  const devRow = DEVICE ? `<tr><td class="mono">${esc(DEVICE.udid.slice(0, 12))}</td><td>Apple iCloud (device)</td><td>${esc(DEVICE.model)}</td><td><span class="status-pill green">Local</span></td><td class="num">${(ARTIFACTS.messages?.length || 0)}</td><td class="mono">now</td></tr>` : "";
   return `
-    <div class="page-title">Cloud</div><div class="page-sub">Cloud storage and backup evidence sources.</div>
+    <div class="page-title">Calendars</div><div class="page-sub">Calendar events and appointments.</div>
     <div class="panel-card">
-      <div class="filter-bar"><button class="btn" onclick="addCloudSource()">Add Cloud Source</button></div>
-      <table class="data"><thead><tr><th>Account</th><th>Provider</th><th>Backup</th><th>Sync Status</th><th>Artifacts</th><th>Last Sync</th></tr></thead>
-      <tbody>${devRow}${rows || (devRow ? "" : `<tr><td colspan="6" class="empty-state">No cloud sources configured.</td></tr>`)}</tbody></table>
-    </div>
-    <div class="panel-card"><div class="panel-card-head">iCloud Acquisition</div>
-      <div class="empty-state" style="text-align:left;padding:13px">Full iCloud backup pull requires Apple ID credentials and 2FA. Use the desktop CLI: <span class="mono">pymobiledevice3 icloud</span> — UI integration is on the roadmap.</div></div>`;
+      <div class="empty-state">
+        No calendar events indexed in active extraction.<br>
+        When parsed from <span class="mono">Calendar.sqlitedb</span>, scheduled appointments and invitations appear here.
+      </div>
+    </div>`;
 }
 
+function pageCloud() {
+  return `
+    <div class="page-title">Cloud Evidence</div><div class="page-sub">Device-extracted cloud tokens, iCloud pairing, and synchronization history.</div>
+    <div class="panel-card">
+      <div class="panel-card-head">Local iCloud & Account Identifiers</div>
+      <div style="padding:14px;line-height:1.6;color:var(--muted)">
+        ${DEVICE ? `
+          <div class="ci-row"><span class="ci-key">Target UDID</span><span class="ci-val mono">${esc(DEVICE.udid)}</span></div>
+          <div class="ci-row"><span class="ci-key">Account Status</span><span class="ci-val"><span class="status-pill green">PAIRED</span> Local account pairing extracted</span></div>
+          <div class="ci-row"><span class="ci-key">Cloud Sync</span><span class="ci-val">Local backup files available in case folder</span></div>
+        ` : `
+          <div class="empty-state">Attach an iOS target to inspect pairing tokens and local iCloud accounts.</div>
+        `}
+      </div>
+    </div>`;
+}
+
+/* ---------------- location ---------------- */
 let locationTypeFilter = "all";
 function filterLocationType(t) {
   locationTypeFilter = t;
   render();
 }
-async function runLocationScan() {
-  const d = document.getElementById("loc-scan-path")?.value.trim();
-  const out = document.getElementById("loc-scan-out");
-  if (!d) { if (out) out.innerHTML = '<span class="mono">enter path</span>'; return; }
-  if (out) out.innerHTML = '<span class="mono">discovering location databases...</span>';
-  const r = await api("/api/appcatalog?dir=" + encodeURIComponent(d));
-  const dbs = (r && r.databases) || [];
-  const locDbs = dbs.filter(x => /consolidated|location|cellular|routined|cache_encrypted/i.test(x.path || x.rel || ""));
-  if (out) {
-    out.innerHTML = `
-      <div class="log-event"><span class="dot ${locDbs.length ? "green" : "amber"}"></span>
-      <div class="log-text">Found <b>${locDbs.length}</b> potential location databases in extraction.</div></div>
-      ${locDbs.slice(0, 5).map(db => `<div class="mono" style="padding-left:14px">· ${esc(db.rel || db.path)}</div>`).join("")}`;
-  }
-}
-
 function pageLocation() {
   const locs = ARTIFACTS.locations || [];
   if (!locs.length) {
     return `
       <div class="page-title">Location & Telemetry Intelligence</div>
       <div class="page-sub">GPS fixes, Cell Tower handshakes, and Wi-Fi geolocation tracking.</div>
-      <div class="two-col">
-        <div class="panel-card">
-          <div class="panel-card-head">Location Records</div>
-          <div class="empty-state">No location artifacts in the current extraction.<br>
-          Location data is extracted from <span class="mono">consolidated.db</span>, <span class="mono">cache_encryptedA.db</span>, or <span class="mono">com.apple.routined</span> cache.</div>
-          <div style="padding:0 13px 13px">
-            <div class="filter-bar">
-              <input class="form-input" id="loc-scan-path" placeholder="Extraction path (e.g. ~/cases/C1/backup)" style="width:320px" value="${esc(ACTIVE_CASE?.destination || "")}">
-              <button class="btn" onclick="runLocationScan()">Scan Directory</button>
-            </div>
-            <div id="loc-scan-out" style="margin-top:8px"></div>
-          </div>
-        </div>
-        <div class="panel-card">
-          <div class="panel-card-head">Map Visualization</div>
-          <div class="empty-state" style="height:260px;display:flex;align-items:center;justify-content:center">
-            Map visualization populates when location records are parsed.
-          </div>
+      <div class="panel-card">
+        <div class="empty-state">
+          No location records parsed in current extraction.<br>
+          Location data is extracted from <span class="mono">consolidated.db</span>, <span class="mono">cache_encryptedA.db</span>, or cell tower caches.
         </div>
       </div>`;
   }
-
-  const types = {};
-  locs.forEach(l => { const t = l.type || "Other"; types[t] = (types[t] || 0) + 1; });
-  const filtered = locationTypeFilter === "all" ? locs : locs.filter(l => (l.type || "Other") === locationTypeFilter);
-  const rows = filtered.slice(0, 500).map(r => `
+  const filtered = locationTypeFilter === "all" ? locs : locs.filter(l => (l.type || "GPSFix") === locationTypeFilter);
+  const rows = filtered.slice(0, 300).map(r => `
     <tr>
       <td class="mono">${fmtDate(r.date)}</td>
-      <td><span class="status-pill ${r.type === 'GPSFix' ? 'green' : r.type === 'CellTower' ? 'purple' : r.type === 'WiFi' ? 'blue' : 'cyan'}">${esc(r.type || "Location")}</span></td>
+      <td><span class="status-pill ${r.type === 'GPSFix' ? 'green' : 'blue'}">${esc(r.type || "GPSFix")}</span></td>
       <td class="mono">${esc(Number(r.latitude || 0).toFixed(6))}, ${esc(Number(r.longitude || 0).toFixed(6))}</td>
-      <td class="num">${r.confidence !== undefined && r.confidence !== null ? esc(r.confidence) : "—"}</td>
       <td>${esc(r.details || "—")}</td>
-      <td><a class="btn" style="padding:2px 8px;font-size:10px;text-decoration:none" href="https://www.openstreetmap.org/?mlat=${r.latitude}&mlon=${r.longitude}#map=16/${r.latitude}/${r.longitude}" target="_blank">Map ↗</a></td>
-    </tr>`).join("");
-
-  const latest = locs[0];
-  const typeKeys = ["all", ...Object.keys(types)];
+      <td><a class="btn" style="padding:2px 8px;font-size:10.5px;text-decoration:none" href="https://www.openstreetmap.org/?mlat=${r.latitude}&mlon=${r.longitude}#map=16/${r.latitude}/${r.longitude}" target="_blank">Open Map ↗</a></td>
+    </tr>
+  `).join("");
 
   return `
     <div class="page-title">Location & Telemetry Intelligence</div>
     <div class="page-sub">GPS fixes, Cell Tower handshakes, and Wi-Fi geolocation tracking.</div>
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
-      <div class="metric-card"><div class="metric-body"><div class="metric-label">Total Fixes</div><div class="metric-value">${locs.length}</div></div></div>
-      <div class="metric-card"><div class="metric-body"><div class="metric-label">GPS Fixes</div><div class="metric-value">${types["GPSFix"] || 0}</div></div></div>
-      <div class="metric-card"><div class="metric-body"><div class="metric-label">Cell Towers</div><div class="metric-value">${types["CellTower"] || 0}</div></div></div>
-      <div class="metric-card"><div class="metric-body"><div class="metric-label">Wi-Fi Geolocation</div><div class="metric-value">${types["WiFi"] || 0}</div></div></div>
-      <div class="metric-card"><div class="metric-body"><div class="metric-label">Routine Visits</div><div class="metric-value">${types["RoutineVisit"] || 0}</div></div></div>
-    </div>
     <div class="panel-card">
-      <div class="panel-card-head">Location History (${filtered.length} points)</div>
-      <div class="filter-bar" style="gap:6px">
-        ${typeKeys.map(t => `<button class="btn ${locationTypeFilter === t ? "primary" : ""}" onclick="filterLocationType('${t}')">${t.toUpperCase()} (${t === 'all' ? locs.length : (types[t] || 0)})</button>`).join("")}
-        <input class="form-input" placeholder="Search coordinates, details..." style="width:220px;margin-left:auto" oninput="filterTable('loc-table', this.value)">
+      <div class="filter-bar">
+        <button class="btn ${locationTypeFilter === 'all' ? 'primary' : ''}" onclick="filterLocationType('all')">ALL (${locs.length})</button>
+        <button class="btn ${locationTypeFilter === 'GPSFix' ? 'primary' : ''}" onclick="filterLocationType('GPSFix')">GPS FIXES</button>
+        <button class="btn ${locationTypeFilter === 'CellTower' ? 'primary' : ''}" onclick="filterLocationType('CellTower')">CELL TOWERS</button>
+        <input class="form-input" placeholder="Search coordinates..." style="width:200px;margin-left:auto" oninput="filterTable('loc-table', this.value)">
       </div>
       <table class="data" id="loc-table">
-        <thead><tr><th>Timestamp</th><th>Type</th><th>Coordinates (Lat, Lon)</th><th>Confidence</th><th>Details</th><th>Map</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6" class="empty-state">No records match this filter.</td></tr>'}</tbody>
+        <thead><tr><th>Timestamp</th><th>Fix Type</th><th>Coordinates (Lat, Lon)</th><th>Details</th><th>Mapping</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
-    </div>
-    ${latest ? `
-    <div class="panel-card">
-      <div class="panel-card-head">Most Recent Fix Preview</div>
-      <div class="log-event">
-        <span class="dot green"></span>
-        <div class="log-body">
-          <div class="log-text"><b>${esc(latest.type || "Fix")}</b> at <span class="mono">${esc(Number(latest.latitude || 0).toFixed(6))}, ${esc(Number(latest.longitude || 0).toFixed(6))}</span> · ${fmtDate(latest.date)}</div>
-          <div class="log-time">${esc(latest.details || "")}</div>
-        </div>
-        <a class="btn primary" href="https://www.openstreetmap.org/?mlat=${latest.latitude}&mlon=${latest.longitude}#map=16/${latest.latitude}/${latest.longitude}" target="_blank">Open on OpenStreetMap</a>
-      </div>
-    </div>` : ""}`;
+    </div>`;
 }
 
-/* ---------------- media / files ---------------- */
+/* ---------------- media ---------------- */
 let ml = [], mi = 0;
 function openLightbox(i) { mi = i; renderLightbox(); document.getElementById("lightbox").style.display = "flex"; }
 function closeLightbox() { document.getElementById("lightbox").style.display = "none"; }
@@ -682,13 +906,12 @@ function navLight(delta) { mi = (mi + delta + ml.length) % ml.length; renderLigh
 function renderLightbox() {
   const m = ml[mi];
   const img = document.getElementById("lb-img");
-  if (m.thumb) { img.src = m.thumb; img.style.display = "block"; } else img.style.display = "none";
+  if (m && m.thumb) { img.src = m.thumb; img.style.display = "block"; } else if (img) img.style.display = "none";
   document.getElementById("lb-name").textContent = (mi + 1) + " / " + ml.length;
   document.getElementById("lb-meta").innerHTML =
-    `<div style="font-weight:700;color:#e8eaee;font-size:12px">${esc(m.name)}</div>` +
-    `${fmtBytes(m.size)} · ${fmtDate(m.mtime)} · source: ${esc(m.source)}<br>` +
-    `<span style="word-break:break-all">${m.hash ? "sha256: " + esc(m.hash) : "sha256: not computed (>25 MB)"}</span><br>` +
-    `<span style="word-break:break-all;color:#5d6470">${esc(m.path)}</span>`;
+    `<div style="font-weight:700;color:#fff;font-size:12px">${esc(m?.name)}</div>` +
+    `${fmtBytes(m?.size || 0)} · ${fmtDate(m?.mtime)} · source: ${esc(m?.source || "")}<br>` +
+    `<span style="word-break:break-all">${m?.hash ? "sha256: " + esc(m.hash) : "sha256: on demand"}</span>`;
 }
 function pageMedia() {
   const items = ARTIFACTS.media_index || [];
@@ -697,51 +920,58 @@ function pageMedia() {
     <div class="media-card" style="cursor:pointer" onclick="openLightbox(${i})">
       ${m.thumb ? `<img class="media-thumb" src="${m.thumb}" loading="lazy">` : `<div class="media-thumb-placeholder">${ICONS.files}</div>`}
       <div class="media-body"><div class="media-name">${esc(m.name)}</div>
-      <div class="media-meta">${fmtDate(m.mtime)} · ${fmtBytes(m.size)} · ${esc(m.source)}</div>
-      <div class="media-hash">${m.hash ? "sha256:" + esc(m.hash.slice(0, 18)) + "…" : "sha256: —"}</div></div>
+      <div class="media-meta">${fmtDate(m.mtime)} · ${fmtBytes(m.size)}</div>
+      <div class="media-hash">${m.hash ? "sha256:" + esc(m.hash.slice(0, 16)) + "…" : "sha256: —"}</div></div>
     </div>`).join("");
   return `
-    <div class="page-title">Media</div><div class="page-sub">Photos, videos and audio evidence.</div>
-    ${items.length ? `<div class="filter-bar"><input class="form-input" placeholder="Filter media..." style="width:220px" oninput="filterGrid(this.value)"><span class="mono" style="margin-left:auto">${items.length} files indexed</span></div>
+    <div class="page-title">Media</div><div class="page-sub">Photos, videos and audio evidence extracted from the filesystem.</div>
+    ${items.length ? `<div class="filter-bar"><input class="form-input" placeholder="Filter media..." style="width:240px" oninput="filterGrid(this.value)"><span class="mono" style="margin-left:auto">${items.length} media files indexed</span></div>
     <div class="media-grid" id="media-grid">${cards}</div>` :
-    `<div class="panel-card"><div class="empty-state">No media indexed. Run an acquisition with the media option.</div></div>`}`;
+    `<div class="panel-card"><div class="empty-state">No media indexed. Run an acquisition with the media option enabled.</div></div>`}`;
 }
 function filterGrid(q) {
   q = q.toLowerCase();
   document.querySelectorAll("#media-grid .media-card").forEach(c =>
     c.style.display = c.textContent.toLowerCase().includes(q) ? "" : "none");
 }
+
 function pageFiles() {
-  const rows = (ARTIFACTS.app_databases || []).slice(0, 300).map(d => `<tr><td class="mono">${esc(d.path)}</td><td>${esc(d.domain)}</td><td class="num">${fmtBytes(d.size)}</td><td class="mono">—</td><td class="mono">—</td><td class="mono">sha256 on demand</td></tr>`).join("");
-  return tablePage("Files", "Documents and file system artifacts.", ["Path","Source Domain","Size","Modified","Created","Hash"], rows || `<tr><td colspan="6" class="empty-state">No file artifacts.</td></tr>`);
+  const rows = (ARTIFACTS.app_databases || []).slice(0, 300).map(d => `<tr>
+    <td class="mono"><b>${esc(d.path)}</b></td>
+    <td>${esc(d.domain)}</td>
+    <td class="num">${fmtBytes(d.size)}</td>
+    <td class="mono">Extracted</td>
+  </tr>`).join("");
+  return tablePage("Files", "Application sandbox databases and container storage.", ["Path","Domain","Size","Status"], rows || `<tr><td colspan="4" class="empty-state">No files indexed.</td></tr>`);
 }
 
-/* ---------------- forensics (all sub-panels functional) ---------------- */
+/* ---------------- forensics ---------------- */
 function pageForensics() {
-  const tabs = ["Timeline","Artifact Search","Hash Analysis","SQLite Browser","File System","Deleted Artifacts","Recovered Data","Correlation"];
+  const tabs = ["Timeline","Artifact Search","Hash Analysis","SQLite Browser","File System"];
   const tl = ARTIFACTS.timeline_preview || [];
-  const kc = ARTIFACTS.keychain || [], notes = ARTIFACTS.notes || [];
   const sqliteFiles = ARTIFACTS.sqlite_files || [];
   return `
-    <div class="page-title">Forensics</div><div class="page-sub">Advanced examination: timeline, search, hash, SQLite, deleted data.</div>
+    <div class="page-title">Forensics</div><div class="page-sub">Advanced forensic examination: timeline, multi-table search, multi-hashing, and SQLite inspection.</div>
     <div class="panel-card">
       <div class="subnav">${tabs.map((t, i) => `<span class="subnav-item ${i === 0 ? "active" : ""}" onclick="switchTab(this,'ftab',${i})">${t}</span>`).join("")}</div>
 
       <div class="ftab" id="ftab-0">
-        ${tl.length ? `<table class="data"><thead><tr><th>Timestamp</th><th>Artifact</th><th>Summary</th></tr></thead>
+        ${tl.length ? `<table class="data"><thead><tr><th>Timestamp</th><th>Artifact Category</th><th>Event Summary</th></tr></thead>
           <tbody>${tl.map(r => `<tr><td class="mono">${esc(r[0])}</td><td><span class="status-pill blue">${esc(r[1])}</span></td><td>${esc(r[2])}</td></tr>`).join("")}</tbody></table>`
-        : `<div class="empty-state">Timeline populates after a backup is parsed. Current extraction: ${kc.length} keychain items, ${notes.length} notes.</div>`}
+        : `<div class="empty-state">Timeline populates after a backup is parsed. Generate report or run acquisition to view events.</div>`}
       </div>
 
       <div class="ftab" id="ftab-1" style="display:none">
-        <div class="filter-bar"><input class="form-input" id="fa-search" placeholder="Search all artifacts instantly..." style="width:320px" oninput="artifactSearch(this.value)"></div>
-        <div id="fa-results"><div class="empty-state">Type to search across ${(ARTIFACTS.messages?.length || 0) + (ARTIFACTS.contacts?.length || 0) + (ARTIFACTS.calls?.length || 0) + (ARTIFACTS.history?.length || 0)} artifact records.</div></div>
+        <div class="filter-bar"><input class="form-input" id="fa-search" placeholder="Search across all extracted records..." style="width:360px" oninput="artifactSearch(this.value)"></div>
+        <div id="fa-results"><div class="empty-state">Type to search messages, contacts, calls, history, and notes.</div></div>
       </div>
 
       <div class="ftab" id="ftab-2" style="display:none">
-        <div style="padding:13px">
-          <div class="form-field"><span class="form-label">File path (under evidence directory / ~/cases)</span>
-          <input class="form-input" id="hash-path" placeholder="/home/.../cases/.../file" style="width:100%;max-width:540px"></div>
+        <div style="padding:14px">
+          <div class="form-field">
+            <span class="form-label">File Path (under ~/cases)</span>
+            <input class="form-input" id="hash-path" placeholder="/home/.../cases/.../file" style="width:100%;max-width:560px" value="${esc(ACTIVE_CASE?.destination ? ACTIVE_CASE.destination + "/case.json" : "")}">
+          </div>
           <div style="margin-top:10px;display:flex;gap:8px">
             <button class="btn primary" onclick="doMultiHash()">Compute Multi-Hash (MD5 + SHA-256 + SHA-512)</button>
             <button class="btn" onclick="doHash()">Compute SHA-256</button>
@@ -752,25 +982,22 @@ function pageForensics() {
 
       <div class="ftab" id="ftab-3" style="display:none">
         <div class="filter-bar">
-          <select class="form-select" id="sql-file" onchange="loadSqlTables()" style="max-width:420px">
+          <select class="form-select" id="sql-file" onchange="loadSqlTables()" style="max-width:440px">
             <option value="">Select a SQLite file (${sqliteFiles.length} available)...</option>
             ${sqliteFiles.map(f => `<option value="${esc(f)}">${esc(f.split("/").slice(-3).join("/"))}</option>`).join("")}
           </select>
-          <select class="form-select" id="sql-table" onchange="loadSqlRows()" style="max-width:200px"><option value="">Table...</option></select>
+          <select class="form-select" id="sql-table" onchange="loadSqlRows()" style="max-width:220px"><option value="">Table...</option></select>
         </div>
-        <div id="sql-out"><div class="empty-state">Choose a file and table to browse records (read-only, first 200 rows).</div></div>
+        <div id="sql-out"><div class="empty-state">Choose a database and table to browse records (read-only mode).</div></div>
       </div>
 
       <div class="ftab" id="ftab-4" style="display:none">
-        <table class="data"><thead><tr><th>Path</th><th>Domain</th><th>Size</th></tr></thead>
-        <tbody>${(ARTIFACTS.app_databases || []).slice(0, 150).map(d => `<tr><td class="mono">${esc(d.path)}</td><td>${esc(d.domain)}</td><td class="num">${fmtBytes(d.size)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty-state">No file artifacts.</td></tr>`}</tbody></table>
+        <table class="data"><thead><tr><th>Database Path</th><th>Domain</th><th>Size</th></tr></thead>
+        <tbody>${(ARTIFACTS.app_databases || []).slice(0, 150).map(d => `<tr><td class="mono">${esc(d.path)}</td><td>${esc(d.domain)}</td><td class="num">${fmtBytes(d.size)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty-state">No database files extracted.</td></tr>`}</tbody></table>
       </div>
-
-      <div class="ftab" id="ftab-5" style="display:none"><div class="empty-state">Deleted-artifact recovery (WAL carving) is on the roadmap. Logical extractions do not contain deleted records.</div></div>
-      <div class="ftab" id="ftab-6" style="display:none"><div class="empty-state">Recovered-data workspace — requires filesystem-level extraction (jailbreak route per capability matrix).</div></div>
-      <div class="ftab" id="ftab-7" style="display:none"><div class="empty-state">Cross-artifact correlation engine — roadmap. Timestamps already normalized across artifacts for the timeline.</div></div>
     </div>`;
 }
+
 function artifactSearch(q) {
   q = q.toLowerCase().trim();
   const box = document.getElementById("fa-results");
@@ -778,7 +1005,7 @@ function artifactSearch(q) {
   const groups = [];
   const scan = (name, rows, fields) => {
     const hits = (rows || []).filter(r => fields.some(f => String(r[f] || "").toLowerCase().includes(q))).slice(0, 8);
-    if (hits.length) groups.push(`<div class="panel-heading" style="padding:8px 13px 0">${name} — ${hits.length} hit(s)</div>
+    if (hits.length) groups.push(`<div class="panel-heading" style="padding:10px 14px 4px">${name} — ${hits.length} hit(s)</div>
       <table class="data"><tbody>${hits.map(r => `<tr><td class="mono">${fmtDate(r.date || r.created || r.modified)}</td><td>${esc(fields.map(f => r[f]).filter(Boolean).join(" · ").slice(0, 160))}</td></tr>`).join("")}</tbody></table>`);
   };
   scan("Messages (SMS/iMessage)", ARTIFACTS.messages, ["text", "sender", "chat"]);
@@ -791,37 +1018,40 @@ function artifactSearch(q) {
   scan("History", ARTIFACTS.history, ["url", "title"]);
   scan("Keychain", ARTIFACTS.keychain, ["service", "account"]);
   scan("Notes", ARTIFACTS.notes, ["title"]);
-  box.innerHTML = groups.join("") || `<div class="empty-state">No matches for "${esc(q)}".</div>`;
+  box.innerHTML = groups.join("") || `<div class="empty-state">No matches found for "${esc(q)}".</div>`;
 }
+
 async function doHash() {
   const p = document.getElementById("hash-path").value.trim();
   const out = document.getElementById("hash-result");
   if (!p) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
-  out.innerHTML = '<span class="mono">computing SHA-256...</span>';
-  const r = await api("/api/hash", {method: "POST", body: JSON.stringify({path: p})});
-  out.innerHTML = r.sha256 ? `<div class="mono" style="word-break:break-all">sha256: ${esc(r.sha256)}</div>` : `<span class="mono" style="color:var(--red)">${esc(r.error || "failed")}</span>`;
+  out.innerHTML = '<span class="mono">Computing SHA-256...</span>';
+  const r = await api("/api/hash", {method: "POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({path: p})});
+  out.innerHTML = r.sha256 ? `<div class="mono" style="word-break:break-all;color:#34d399">SHA-256: ${esc(r.sha256)}</div>` : `<span class="mono" style="color:var(--red)">${esc(r.error || "failed")}</span>`;
 }
+
 async function doMultiHash() {
   const p = document.getElementById("hash-path").value.trim();
   const out = document.getElementById("hash-result");
   if (!p) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
-  out.innerHTML = '<span class="mono">computing hardware-accelerated multi-hash...</span>';
+  out.innerHTML = '<span class="mono">Computing C++ hardware-accelerated triple multi-hash...</span>';
   const r = await api("/api/multihash?path=" + encodeURIComponent(p));
   if (r && !r.error && r.sha256) {
     out.innerHTML = `
-      <table class="data" style="max-width:700px">
-        <thead><tr><th>Algorithm</th><th>Digest</th></tr></thead>
+      <table class="data" style="max-width:720px">
+        <thead><tr><th>Algorithm</th><th>Hash Digest</th></tr></thead>
         <tbody>
           <tr><td><b>MD5</b></td><td class="mono">${esc(r.md5)}</td></tr>
           <tr><td><b>SHA-256</b></td><td class="mono">${esc(r.sha256)}</td></tr>
           <tr><td><b>SHA-512</b></td><td class="mono" style="word-break:break-all">${esc(r.sha512)}</td></tr>
-          <tr><td><b>Engine</b></td><td><span class="status-pill green">osleuth_core C++ (Hardware Accelerated Single-Pass)</span></td></tr>
+          <tr><td><b>Engine</b></td><td><span class="status-pill green">Single-Pass Native C++ (Hardware Accelerated)</span></td></tr>
         </tbody>
       </table>`;
   } else {
-    out.innerHTML = `<span class="mono" style="color:var(--red)">${esc((r && r.error) || "computation failed (file must be under ~/cases)")}</span>`;
+    out.innerHTML = `<span class="mono" style="color:var(--red)">${esc((r && r.error) || "computation failed (path must be under ~/cases)")}</span>`;
   }
 }
+
 async function loadSqlTables() {
   const f = document.getElementById("sql-file").value;
   const sel = document.getElementById("sql-table");
@@ -831,9 +1061,10 @@ async function loadSqlTables() {
   const r = await api("/api/sqlite?path=" + encodeURIComponent(f));
   if (r.tables) {
     sel.innerHTML = `<option value="">Table...</option>` + r.tables.map(t => `<option>${esc(t)}</option>`).join("");
-    document.getElementById("sql-out").innerHTML = `<div class="empty-state">${r.tables.length} tables — select one to preview rows.</div>`;
+    document.getElementById("sql-out").innerHTML = `<div class="empty-state">${r.tables.length} tables found — select one to preview rows.</div>`;
   } else document.getElementById("sql-out").innerHTML = `<div class="empty-state">${esc(r.error || "failed")}</div>`;
 }
+
 async function loadSqlRows() {
   const f = document.getElementById("sql-file").value;
   const t = document.getElementById("sql-table").value;
@@ -849,27 +1080,35 @@ async function loadSqlRows() {
 /* ---------------- reports ---------------- */
 async function genReport() {
   if (!ACTIVE_CASE) { toast("Open a case first", "red"); return; }
-  document.getElementById("rep-status").textContent = "generating...";
-  const r = await api("/api/report", {method: "POST", body: JSON.stringify({case: ACTIVE_CASE})});
-  document.getElementById("rep-status").textContent = r.ok ? "done" : (r.error || "failed");
-  if (r.ok) toast("Report generated", "green");
+  const statusEl = document.getElementById("rep-status");
+  if (statusEl) statusEl.textContent = "generating report.html & case_uco.jsonld...";
+  notify("Report Generation", `Generating forensic report for ${ACTIVE_CASE.case_id}...`, "info", "EVIDENCE");
+  const r = await api("/api/report", {method: "POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({case: ACTIVE_CASE})});
+  if (statusEl) statusEl.textContent = r.ok ? "Report ready" : (r.error || "failed");
+  if (r.ok) {
+    notify("Report Ready", `Examiner report generated: ${r.report}`, "success", "EVIDENCE");
+    render();
+  } else {
+    notify("Report Failed", r.error || "Failed to generate report", "error", "EVIDENCE");
+  }
 }
+
 function pageReports() {
   const dest = ACTIVE_CASE?.destination || "";
   return `
     <div class="page-title">Reports & Evidentiary Certification</div>
-    <div class="page-sub">Generate professional case reports, CASE/UCO cyber-investigation ontologies, and triple-hash certificates.</div>
-    <div class="panel-card"><div class="panel-card-head">New Report</div>
+    <div class="page-sub">Generate case reports, CASE/UCO cyber-investigation ontologies, and triple-hash certificates.</div>
+    <div class="panel-card"><div class="panel-card-head">New Report Generation</div>
       <div class="form-grid">
-        <div class="form-field"><span class="form-label">Report Title</span><input class="form-input" value="${ACTIVE_CASE ? esc(ACTIVE_CASE.case_id) + " — Case Report" : "Case Report"}"></div>
-        <div class="form-field"><span class="form-label">Examiner</span><input class="form-input" value="${esc(ACTIVE_CASE?.examiner || "")}"></div>
-        <div class="form-field"><span class="form-label">Sections</span><select class="form-select"><option>Full evidence summary</option><option>Messages only</option><option>Calls only</option><option>Location & Telemetry only</option></select></div>
-        <div class="form-field"><span class="form-label">Format</span><select class="form-select"><option>HTML + CASE/UCO JSON-LD</option><option>HTML Only</option><option>CSV bundle</option><option>PDF (browser print)</option></select></div>
-        <div class="form-field full"><span class="form-label">Examiner Notes</span><textarea class="form-textarea" placeholder="Summary of findings...">${esc(ACTIVE_CASE?.notes || "")}</textarea></div>
+        <div class="form-field"><span class="form-label">Report Title</span><input class="form-input" id="rep-title" value="${ACTIVE_CASE ? esc(ACTIVE_CASE.case_id) + " — Forensic Investigation Report" : "Case Report"}"></div>
+        <div class="form-field"><span class="form-label">Examiner</span><input class="form-input" id="rep-examiner" value="${esc(ACTIVE_CASE?.examiner || "Forensic Examiner")}"></div>
+        <div class="form-field"><span class="form-label">Evidence Scope</span><select class="form-select"><option>Full Evidence Summary (All Artifacts)</option><option>Messages & Chats Only</option><option>Location & Telemetry Only</option></select></div>
+        <div class="form-field"><span class="form-label">Output Standard</span><select class="form-select"><option>HTML + CASE/UCO JSON-LD 1.3.0</option><option>HTML Only</option></select></div>
+        <div class="form-field full"><span class="form-label">Examiner Findings Notes</span><textarea class="form-textarea" placeholder="Summary of forensic findings...">${esc(ACTIVE_CASE?.notes || "")}</textarea></div>
       </div>
-      <div style="padding:0 13px 13px"><button class="btn primary" onclick="genReport()">Generate Report</button> <span id="rep-status" class="mono"></span></div>
+      <div style="padding:0 14px 14px"><button class="btn primary" onclick="genReport()">Generate Report</button> <span id="rep-status" class="mono" style="margin-left:8px"></span></div>
     </div>
-    <div class="panel-card"><div class="panel-card-head">Existing Reports, Ontologies & Integrity Certifications</div>
+    <div class="panel-card"><div class="panel-card-head">Generated Reports, Ontologies & Integrity Seals</div>
       <table class="data"><thead><tr><th>Document</th><th>Format</th><th>Description</th><th>Action</th></tr></thead>
       <tbody>${ACTIVE_CASE ? `
         <tr><td><b>${esc(ACTIVE_CASE.case_id)} — report.html</b></td><td><span class="status-pill green">HTML</span></td><td>Standard examiner forensic report with charts and artifacts</td><td><button class="btn" onclick="window.open('/api/file?path=${encodeURIComponent(dest + "/report/report.html")}')">Open HTML</button></td></tr>
@@ -879,98 +1118,116 @@ function pageReports() {
         : `<tr><td colspan="4" class="empty-state">No active case selected. Reports generate as <span class="mono">report.html</span>, <span class="mono">case_uco.jsonld</span>, and <span class="mono">certification.json</span>.</td></tr>`}</tbody></table>
     </div>`;
 }
+
 async function exportCase() {
-  if (!ACTIVE_CASE) return;
-  toast("Building export archive...", "blue");
-  const r = await api("/api/export", {method: "POST", body: JSON.stringify({case_id: ACTIVE_CASE.case_id})});
-  if (r.url) { toast("Export ready — downloading", "green"); window.open(r.url); }
-  else toast(r.error || "export failed", "red");
+  if (!ACTIVE_CASE) { toast("No active case to export", "red"); return; }
+  notify("Export Archive", `Packaging evidence archive for ${ACTIVE_CASE.case_id}...`, "info", "EVIDENCE");
+  const r = await api("/api/export", {method: "POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({case_id: ACTIVE_CASE.case_id})});
+  if (r.url) {
+    notify("Export Complete", `Archive ready (${fmtBytes(r.size)}). Download started.`, "success", "EVIDENCE");
+    window.open(r.url);
+  } else {
+    notify("Export Failed", r.error || "Archive creation failed", "error", "EVIDENCE");
+  }
 }
 
-/* ---------------- settings ---------------- */
-function pageSettings() {
-  const secs = ["General","Acquisition","Analysis","Evidence","Reports","Storage","Security","Appearance","Advanced"];
+/* ---------------- settings (real persistence) ---------------- */
+async function pageSettings() {
+  if (!CACHE.settings) {
+    CACHE.settings = await api("/api/settings");
+  }
+  const s = CACHE.settings || {};
   return `
-    <div class="page-title">Settings</div><div class="page-sub">Configuration and preferences.</div>
-    <div class="panel-card"><div class="subnav">${secs.map((s, i) => `<span class="subnav-item ${i === 0 ? "active" : ""}" onclick="switchTab(this,'stab',${i});return false">${s}</span>`).join("")}</div>
-      <div class="stab" id="stab-0"><div class="form-grid">
-        <div class="form-field"><span class="form-label">Examiner Name</span><input class="form-input" value="${esc(ACTIVE_CASE?.examiner || "")}"></div>
-        <div class="form-field"><span class="form-label">Default Evidence Root</span><input class="form-input" value="~/cases"></div>
-        <div class="form-field"><span class="form-label">Hash Algorithm</span><select class="form-select"><option>SHA-256</option><option>SHA-512</option></select></div>
-        <div class="form-field"><span class="form-label">Auto-Generate Manifest</span><select class="form-select"><option>Enabled</option><option>Disabled</option></select></div>
-      </div></div>
-      ${secs.slice(1).map((s, i) => `<div class="stab" id="stab-${i + 1}" style="display:none"><div class="empty-state" style="text-align:left;padding:13px">${s} settings — defaults applied. Acquisition options mirror the opensleuth CLI configuration.</div></div>`).join("")}
-      <div style="padding:0 13px 13px"><button class="btn" onclick="toast('Settings saved','green')">Save Settings</button></div>
+    <div class="page-title">Settings</div><div class="page-sub">Workstation preferences and forensic execution defaults.</div>
+    <div class="panel-card">
+      <div class="panel-card-head">Workstation Configuration</div>
+      <div class="form-grid">
+        <div class="form-field">
+          <span class="form-label">Default Examiner Name</span>
+          <input class="form-input" id="set-examiner" value="${esc(s.examiner || "Forensic Examiner")}">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Cases Storage Root</span>
+          <input class="form-input" id="set-cases-root" value="${esc(s.cases_root || "~/cases")}">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Default Integrity Hash</span>
+          <select class="form-select" id="set-hash-algo">
+            <option value="Triple-Hash (MD5+SHA256+SHA512)" ${s.hash_algo?.includes("Triple") ? "selected" : ""}>Triple-Hash (MD5 + SHA-256 + SHA-512 Native)</option>
+            <option value="SHA-256" ${s.hash_algo === "SHA-256" ? "selected" : ""}>SHA-256 Only</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <span class="form-label">Background Polling Frequency</span>
+          <select class="form-select" id="set-poll-rate">
+            <option value="4000" ${s.poll_interval === 4000 ? "selected" : ""}>4 seconds (Balanced Responsive)</option>
+            <option value="2000" ${s.poll_interval === 2000 ? "selected" : ""}>2 seconds (High Speed)</option>
+            <option value="8000" ${s.poll_interval === 8000 ? "selected" : ""}>8 seconds (Low Power)</option>
+          </select>
+        </div>
+      </div>
+      <div style="padding:0 14px 14px;display:flex;gap:8px">
+        <button class="btn primary" onclick="saveSettings()">Save Configuration</button>
+        <button class="btn" onclick="clearWorkstationCache()">Clear UI Cache</button>
+      </div>
     </div>`;
 }
 
-/* ---------------- helpers ---------------- */
+async function saveSettings() {
+  const ex = document.getElementById("set-examiner").value.trim();
+  const cr = document.getElementById("set-cases-root").value.trim();
+  const ha = document.getElementById("set-hash-algo").value;
+  const pr = parseInt(document.getElementById("set-poll-rate").value) || 4000;
+
+  const payload = { examiner: ex, cases_root: cr, hash_algo: ha, poll_interval: pr };
+  const r = await api("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  CACHE.settings = r;
+  document.getElementById("topbar-examiner").textContent = ex || "Examiner";
+  notify("Settings Saved", "Workstation configuration written to disk.", "success", "SYSTEM");
+}
+
+function clearWorkstationCache() {
+  Object.keys(CACHE).forEach(k => CACHE[k] = null);
+  toast("Workstation cache invalidated", "blue");
+  refreshCurrentPage();
+}
+
+/* ---------------- helper tables & views ---------------- */
 function tablePage(title, sub, cols, rows) {
   return `
     <div class="page-title">${title}</div><div class="page-sub">${sub}</div>
     <div class="panel-card">
-      <div class="filter-bar"><input class="form-input" placeholder="Filter ${title.toLowerCase()}..." style="width:220px" oninput="filterTable('tp-${title}', this.value)"><button class="btn" onclick="refreshAll()">Refresh</button></div>
+      <div class="filter-bar"><input class="form-input" placeholder="Filter ${title.toLowerCase()}..." style="width:240px" oninput="filterTable('tp-${title}', this.value)"><button class="btn" onclick="refreshCurrentPage()">Refresh</button></div>
       <table class="data" id="tp-${title}"><thead><tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>
     </div>`;
 }
+
 function emptyPage(title, sub, msg) {
   return `<div class="page-title">${title}</div><div class="page-sub">${sub}</div>
     <div class="panel-card"><div class="empty-state">${msg || "No artifacts available. Connect a device and run an acquisition."}</div></div>`;
 }
+
 function filterTable(id, q) {
   q = q.toLowerCase();
   document.querySelectorAll(`#${CSS.escape(id)} tbody tr`).forEach(tr =>
     tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none");
 }
+
 async function quickAction(a) {
   if (a === "autoexploit") {
-    // One-button detect-and-exploit: jump to the Exploits page and fire the
-    // auto-exploiter (probes the attached device, runs routes until one hits).
     location.hash = "exploits";
-    toast("Auto-exploiter: probing attached device and trying routes...", "blue");
-    try {
-      const r = await api("/api/autoexploit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ allow_destructive: false }),
-      });
-      if (r.busy) toast("Auto-exploiter already running", "amber");
-      else if (r.started) toast("Auto-exploiter started", "green");
-      else toast("Auto-exploiter failed to start", "red");
-    } catch { toast("Auto-exploiter request failed", "red"); }
-    await render();
-    setTimeout(pollAutoExploit, 1500);
+    startAutoExploit();
     return;
   }
   if (a === "add") location.hash = "devices";
-  else if (a === "open") {
-    const id = prompt("Case ID to open:", CASES[0]?.case_id || "");
-    if (id) { ACTIVE_CASE = CASES.find(c => c.case_id === id) || {case_id: id, destination: "~/cases/" + id}; renderCasePanel(); toast("Case " + id + " loaded", "green"); refreshAll(); }
-  }
+  else if (a === "open") openCaseModal();
   else if (a === "report") location.hash = "reports";
   else if (a === "export") exportCase();
-  else if (a === "parse") {
-    const p = prompt("Path to backup directory (containing Manifest.db):", "~/cases/iphone11/backup");
-    if (p) {
-      toast("Parsing image...", "blue");
-      const r = await api("/api/parse-image", {method: "POST", body: JSON.stringify({path: p})});
-      r.ok ? (toast("Parsed — report ready", "green"), refreshAll()) : toast(r.error || "parse failed", "red");
-    }
-  }
-}
-
-/* ---------------- notifications dropdown ---------------- */
-async function toggleNotifs() {
-  let p = document.getElementById("notif-panel");
-  if (p) { p.remove(); return; }
-  p = document.createElement("div");
-  p.id = "notif-panel";
-  p.style.cssText = "position:fixed;top:52px;right:300px;width:330px;z-index:98;background:#121418;border:1px solid #232833;border-radius:5px;overflow:hidden";
-  const r = await api("/api/log");
-  p.innerHTML = `<div class="panel-card-head">Acquisition Log</div>` +
-    ((r.lines || []).slice(-12).reverse().map(l => `<div class="log-event"><span class="dot blue"></span><div class="log-body"><div class="log-text mono" style="font-size:10.5px">${esc(l.slice(0, 80))}</div></div></div>`).join("") || `<div class="empty-state">No events.</div>`);
-  document.body.appendChild(p);
-  setTimeout(() => { if (document.getElementById("notif-panel")) p.remove(); }, 8000);
+  else if (a === "parse") openParseModal();
 }
 
 /* ---------------- exploit state & evaluation ---------------- */
@@ -978,7 +1235,6 @@ let EXPLOIT_FILTER_CHIP = "";
 let EXPLOIT_FILTER_IOS = "";
 let EXPLOIT_FILTER_LAYER = "";
 let EXPLOIT_FILTER_NOHW = false;
-let EXPLOITS_DATA = null;
 let ROUTE_DETAILS_EXPANDED = {};
 
 function toggleRouteDetails(idx) {
@@ -986,6 +1242,51 @@ function toggleRouteDetails(idx) {
   const row = document.getElementById(`route-detail-${idx}`);
   if (row) {
     row.style.display = ROUTE_DETAILS_EXPANDED[idx] ? "table-row" : "none";
+  }
+}
+
+// Three-tier honest deployability (mirrors backend /api/exploit/execute):
+//   HOST     - executor runs a real PC-side binary (checkm8/gaster, usbliter8ctl,
+//              palera1n, irecovery, PongoOS/Blackbird). -> runs host tool
+//   SIDELOAD - on-device app agent (Dopamine/kfd/TrollStore/NathanLR). Requires
+//              installing the app on an unlocked device (afu_agent flow).
+//   none     - DOCUMENTED-only chains (no public PoC / CISA / research-only),
+//              no public weaponization -> not deployable, honesty-flagged.
+const DEPLOY_HINT_RE = /no public poc|no public tooling|research-only|cisa known exploited|documented only|no public weaponization/i;
+const HOST_BIN_RE = /gaster|ipwndfu|palera1n|checkra1n|irecovery|usbliter8ctl|picotool|idevice|pymobiledevice3|ifuse|ssh|pongoos|restored|idevicebackup2|ipwnder32/i;
+function routeDeployMode(r) {
+  const tl = (r.tooling || []).join(" ").toLowerCase();
+  if (DEPLOY_HINT_RE.test(tl)) return "none";
+  const layer = String(r.layer || "");
+  if (HOST_BIN_RE.test(tl) || ["bootrom","bootrom-chain","sep","iboot"].includes(layer)) return "host";
+  if (["kernel","userspace","trollstore","ppl"].includes(layer)) return "sideload";
+  return "none";
+}
+function deployTierBadge(r) {
+  const m = routeDeployMode(r);
+  if (m === "host")    return `<span class="status-pill green" style="font-size:9px">HOST</span>`;
+  if (m === "sideload") return `<span class="status-pill cyan" style="font-size:9px">SIDELOAD</span>`;
+  return `<span class="status-pill gray" style="font-size:9px">RESEARCH-ONLY</span>`;
+}
+async function executeSingleRoute(name, idx) {
+  const outBox = document.getElementById(`route-out-${idx}`);
+  const statusTag = document.getElementById(`route-tag-${idx}`);
+  if (outBox) {
+    outBox.style.display = "block";
+    outBox.textContent = `Testing route preconditions for ${name}...`;
+  }
+  notify("Exploit Execution", `Testing route ${name}...`, "info", "EXPLOIT");
+  const r = await api("/api/exploit/execute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ route: name, allow_destructive: false }),
+  });
+  if (outBox) {
+    outBox.textContent = r.message + (r.output ? `\n\nOutput:\n${r.output}` : "") + (r.detail ? `\nDetail: ${r.detail}` : "");
+  }
+  if (statusTag) {
+    statusTag.className = `status-pill ${r.ok ? "green" : "amber"}`;
+    statusTag.textContent = r.ok ? "VERIFIED / READY" : (r.status?.toUpperCase() || "FAILED");
   }
 }
 
@@ -998,6 +1299,7 @@ async function evalExploitsTarget() {
   EXPLOIT_FILTER_IOS = v;
   EXPLOIT_FILTER_LAYER = l;
   EXPLOIT_FILTER_NOHW = n;
+  CACHE.exploits = null; // force fetch with filter
   await render();
 }
 
@@ -1006,22 +1308,16 @@ async function resetExploitsTarget() {
   EXPLOIT_FILTER_IOS = DEVICE?.ios || "";
   EXPLOIT_FILTER_LAYER = "";
   EXPLOIT_FILTER_NOHW = false;
+  CACHE.exploits = null;
   await render();
 }
 
-/* ---------------- auto-exploiter (AXIOM/Cellebrite-style) ---------------- */
-let AEXPLOIT = null;          // {running, report, error, log, finished_at}
-let AE_DESTRUCTIVE = false;   // survives re-renders (checkbox state)
-let AE_INTERACTING = false;   // suppress full re-render while user works
+/* ---------------- auto-exploiter ---------------- */
+let AEXPLOIT = null;
+let AE_DESTRUCTIVE = false;
 
 function toggleAeDestructive(v) {
   AE_DESTRUCTIVE = !!v;
-}
-
-function markInteracting() {
-  AE_INTERACTING = true;
-  clearTimeout(markInteracting._t);
-  markInteracting._t = setTimeout(() => { AE_INTERACTING = false; }, 4000);
 }
 
 async function refreshAutoExploit() {
@@ -1033,34 +1329,28 @@ async function refreshAutoExploit() {
 async function startAutoExploit() {
   const allowD = document.getElementById("ae-destructive")?.checked ?? AE_DESTRUCTIVE;
   AE_DESTRUCTIVE = allowD;
-  markInteracting();
-  toast("Auto-exploiter running: probing + trying routes...", "blue");
-  try {
-    const r = await api("/api/autoexploit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allow_destructive: allowD }),
-    });
-    if (r.busy) { toast("Auto-exploiter already running", "amber"); }
-    else if (r.started) { toast("Auto-exploiter started", "green"); pollAutoExploit(); }
-    else { toast("Auto-exploiter failed to start", "red"); }
-  } catch { toast("Auto-exploiter request failed", "red"); }
+  notify("Auto-Exploiter", "Probing attached device and running prioritized exploit routes...", "info", "EXPLOIT");
+  const r = await api("/api/autoexploit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ allow_destructive: allowD }),
+  });
+  if (r.busy) { notify("Auto-Exploiter Busy", "An exploit run is already active.", "warning", "EXPLOIT"); }
+  else if (r.started) { notify("Auto-Exploiter Running", "Probing target silicon and testing public routes until hit.", "info", "EXPLOIT"); pollAutoExploit(); }
+  else { notify("Auto-Exploiter Failed", "Could not start exploit engine.", "error", "EXPLOIT"); }
 }
 
 async function pollAutoExploit() {
   const st = await refreshAutoExploit();
   if (st && st.running) {
-    // refresh the results pane in place every 1.5s while running
     const pane = document.getElementById("ae-pane");
     if (pane) pane.innerHTML = await renderAutoExploitPane(st);
     setTimeout(pollAutoExploit, 1500);
   } else if (st && !st.finished_at) {
-    // POST accepted but the worker thread hasn't flipped running=true yet;
-    // keep polling until we see a finished state (race-safe).
     setTimeout(pollAutoExploit, 700);
   } else if (st && st.report) {
-    toast(st.report.winner ? `Route succeeded: ${st.report.winner}` : "No route succeeded this run", st.report.winner ? "green" : "amber");
-    await render();
+    const pane = document.getElementById("ae-pane");
+    if (pane) pane.innerHTML = await renderAutoExploitPane(st);
   }
 }
 
@@ -1074,37 +1364,37 @@ async function renderAutoExploitPane(st) {
     ? `<table class="data"><thead><tr><th>Route</th><th>Status</th><th>Detail</th></tr></thead><tbody>
        ${rep.results.map(r => {
          const mark = r.status === "succeeded" ? "✓" : r.status === "failed" ? "✗" : r.status === "skipped" ? "–" : "…";
-         const color = r.status === "succeeded" ? "green" : r.status === "failed" ? "red" : r.status === "skipped" ? "" : "amber";
+         const color = r.status === "succeeded" ? "green" : r.status === "failed" ? "red" : r.status === "skipped" ? "gray" : "amber";
          return `<tr><td class="mono"><b>${esc(r.name)}</b></td><td><span class="status-pill ${color}">${mark} ${esc(r.status)}</span></td><td style="font-size:11px">${esc(r.detail)}</td></tr>`;
        }).join("")}</tbody></table>`
-    : `<div class="empty-state">No routes attempted yet.</div>`;
+    : `<div class="empty-state">No routes attempted yet. Start the auto-exploiter to run applicable routes.</div>`;
 
   const banner = st.running
-    ? `<div class="log-event"><span class="dot amber"></span><div class="log-body"><div class="log-text"><b>Running…</b> probing device and trying applicable public routes in priority order (bootrom → SEP → AFU → logical).</div></div></div>`
+    ? `<div class="log-event"><span class="text-tag warning">RUNNING</span><div class="log-body"><div class="log-text"><b>Probing and testing routes:</b> trying bootrom → SEP → AFU in priority sequence.</div></div></div>`
     : rep && rep.winner
-      ? `<div class="log-event"><span class="dot green"></span><div class="log-body"><div class="log-text"><b>Route succeeded:</b> ${esc(rep.winner)}</div></div></div>`
+      ? `<div class="log-event"><span class="text-tag success">SUCCESS</span><div class="log-body"><div class="log-text"><b>Route succeeded:</b> ${esc(rep.winner)}</div></div></div>`
       : st.error
-        ? `<div class="log-event"><span class="dot red"></span><div class="log-body"><div class="log-text">${esc(st.error)}</div></div></div>`
-        : `<div class="log-event"><span class="dot"></span><div class="log-body"><div class="log-text">Ready. Start the auto-exploiter to probe the attached device and try every applicable route until one succeeds.</div></div></div>`;
+        ? `<div class="log-event"><span class="text-tag error">ERROR</span><div class="log-body"><div class="log-text">${esc(st.error)}</div></div></div>`
+        : `<div class="log-event"><span class="text-tag info">IDLE</span><div class="log-body"><div class="log-text">Ready. Start the auto-exploiter to probe device and run applicable routes until one succeeds.</div></div></div>`;
 
   return `
     <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-      ${st.running ? `<span class="status-pill amber">● RUNNING</span>` : (rep && rep.winner) ? `<span class="status-pill green">SUCCESS</span>` : `<span class="status-pill">IDLE</span>`}
-      <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer">
+      ${st.running ? `<span class="status-pill amber">● RUNNING</span>` : (rep && rep.winner) ? `<span class="status-pill green">SUCCESS</span>` : `<span class="status-pill gray">IDLE</span>`}
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);cursor:pointer">
         <input type="checkbox" id="ae-destructive" ${AE_DESTRUCTIVE ? "checked" : ""} oninput="toggleAeDestructive(this.checked)"> Allow destructive (A10/A11 checkm8 on iOS 16+)
       </label>
       <button class="btn primary" style="margin-left:auto" onclick="startAutoExploit()" ${st.running ? "disabled" : ""}>${st.running ? "Running…" : "▶ Auto-Exploit Device"}</button>
-      ${st.running ? `<button class="btn" onclick="setTimeout(pollAutoExploit,1200)">Refresh</button>` : ""}
+      ${st.running ? `<button class="btn" onclick="setTimeout(pollAutoExploit,1000)">Refresh</button>` : ""}
     </div>
     ${banner}
-    ${dev ? `<div style="padding:6px 14px;border-top:1px solid var(--border2);display:flex;flex-wrap:wrap;gap:16px;font-size:11.5px">
-        <span class="mono" style="color:var(--muted)">device <b>${esc(dev.model || "?")}</b></span>
-        <span class="mono" style="color:var(--muted)">chip <b>${esc(dev.chip || "?")}</b></span>
-        <span class="mono" style="color:var(--muted)">iOS <b>${esc(dev.ios || "?")}</b></span>
-        <span class="mono" style="color:var(--muted)">state <b>${esc(dev.state || "?")}</b>${dev.pwnd ? ` (PWND: ${esc(dev.pwnd)})` : ""}</span>
+    ${dev ? `<div style="padding:8px 14px;border-top:1px solid var(--border2);display:flex;flex-wrap:wrap;gap:16px;font-size:11.5px">
+        <span class="mono" style="color:var(--muted)">device: <b style="color:#fff">${esc(dev.model || "?")}</b></span>
+        <span class="mono" style="color:var(--muted)">chip: <b style="color:#fff">${esc(dev.chip || "?")}</b></span>
+        <span class="mono" style="color:var(--muted)">iOS: <b style="color:#fff">${esc(dev.ios || "?")}</b></span>
+        <span class="mono" style="color:var(--muted)">state: <b style="color:#fff">${esc(dev.state || "?")}</b>${dev.pwnd ? ` (PWND: ${esc(dev.pwnd)})` : ""}</span>
       </div>` : ""}
     <div style="padding:10px 14px;border-top:1px solid var(--border2)">${results}</div>
-    ${lines ? `<div style="padding:10px 14px;border-top:1px solid var(--border2);max-height:180px;overflow:auto;font-family:var(--mono);font-size:11px;color:var(--faint);background:#0b0d10">${lines}</div>` : ""}`;
+    ${lines ? `<div style="padding:10px 14px;border-top:1px solid var(--border2);max-height:160px;overflow:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted);background:#090b0e">${lines}</div>` : ""}`;
 }
 
 async function pageExploits() {
@@ -1118,16 +1408,14 @@ async function pageExploits() {
   if (EXPLOIT_FILTER_NOHW) params.push("no_hardware=1");
   const qp = params.length ? "?" + params.join("&") : "";
 
-  try {
-    const d = await api("/api/exploits" + qp);
-    if (d && d.routes) EXPLOITS_DATA = d;
-  } catch { EXPLOITS_DATA = null; }
-
-  const d = EXPLOITS_DATA;
-  const routes = d ? d.routes : [];
-  const discs = d ? d.disclosures : [];
-  const expo = d && d.exposure ? d.exposure : [];
-  const rec = d && d.recommendation ? d.recommendation : [];
+  if (!CACHE.exploits) {
+    CACHE.exploits = await api("/api/exploits" + qp);
+  }
+  const d = CACHE.exploits;
+  const routes = d?.routes || [];
+  const discs = d?.disclosures || [];
+  const expo = d?.exposure || [];
+  const rec = d?.recommendation || [];
   const targetLabel = (EXPLOIT_FILTER_CHIP || EXPLOIT_FILTER_IOS)
     ? ` · Target: ${EXPLOIT_FILTER_CHIP || "Any"} / ${EXPLOIT_FILTER_IOS || "Any"}`
     : (DEVICE ? ` · Attached: ${DEVICE.chip || "?"} / ${DEVICE.ios || "?"}` : "");
@@ -1151,27 +1439,31 @@ async function pageExploits() {
         <td class="mono">${esc(r.year)}</td>
         <td class="mono" style="font-size:11px">${esc(chipsStr)}</td>
         <td>${esc(String(r.ios || "").slice(0, 36))}</td>
-        <td>${statePill}</td>
+        <td>${statePill} ${deployTierBadge(r)}</td>
         <td>${toolsStr || "—"}</td>
         <td>${esc(String(r.bfu || "").slice(0, 36))}</td>
         <td><button class="btn" style="padding:2px 8px;font-size:11px" onclick="toggleRouteDetails(${idx})">${isExp ? "Hide" : "Details"}</button></td>
       </tr>
-      <tr id="route-detail-${idx}" style="display:${isExp ? "table-row" : "none"};background:#14171d">
-        <td colspan="10" style="padding:12px 14px;border-bottom:1px solid var(--border2)">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:11.5px">
+      <tr id="route-detail-${idx}" style="display:${isExp ? "table-row" : "none"};background:#131720">
+        <td colspan="10" style="padding:14px;border-bottom:1px solid var(--border2)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:11.5px">
             <div>
-              <div style="color:var(--muted);font-weight:600;margin-bottom:4px">EXPLOIT OVERVIEW & TECHNICAL NOTES</div>
-              <div style="line-height:1.5">${esc(r.notes || "No additional technical notes.")}</div>
-              <div style="margin-top:6px;color:var(--faint)">Layer: <b>${esc(r.layer)}</b> · Year: <b>${esc(r.year)}</b> · BFU Impact: <b>${esc(r.bfu || "None")}</b></div>
+              <div style="color:var(--muted);font-weight:700;margin-bottom:6px">EXPLOIT OVERVIEW & TECHNICAL NOTES</div>
+              <div style="line-height:1.5">${esc(r.notes || "Defensive exploit documentation and implementation.")}</div>
+              <div style="margin-top:8px;color:var(--faint)">Layer: <b>${esc(r.layer)}</b> · Year: <b>${esc(r.year)}</b> · BFU Impact: <b>${esc(r.bfu || "None")}</b></div>
             </div>
             <div>
-              <div style="color:var(--muted);font-weight:600;margin-bottom:4px">EXECUTION PREREQUISITES & TOOLING</div>
+              <div style="color:var(--muted);font-weight:700;margin-bottom:6px">PRECONDITION VERIFICATION & EXECUTION</div>
               <div>Supported Silicon: <span class="mono">${esc(chipsStr)}</span></div>
-              <div>Required State: <span class="mono">${esc(r.state || "AFU / Userland")}</span></div>
-              <div>Hardware Rig: <span class="mono">${esc(r.hardware === "none" ? "Plain PC + USB Cable" : r.hardware === "rig" ? "RP2350 Hardware Rig Required (usbliter8)" : "App Sideload / No extra HW")}</span></div>
-              <div style="margin-top:4px">Execution Binaries: ${toolsStr || "Native"}</div>
+              <div>Required State: <span class="mono">${esc(r.state || "AFU / Normal")}</span></div>
+              <div>Hardware Tooling: <span class="mono">${esc(r.hardware === "none" ? "Plain PC + USB Cable" : r.hardware === "rig" ? "Hardware Rig Required (usbliter8/RP2350)" : "App / Local Execution")}</span></div>
+              <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+                <button class="btn success" onclick="executeSingleRoute('${esc(r.name).replace(/'/g, "\\'")}', ${idx})">⚡ Test / Run Route</button>
+                <span id="route-tag-${idx}" class="status-pill gray">UNTESTED</span>
+              </div>
             </div>
           </div>
+          <div class="route-exec-box" id="route-out-${idx}" style="display:none"></div>
         </td>
       </tr>`;
   }).join("");
@@ -1179,12 +1471,9 @@ async function pageExploits() {
   const discRows = discs.map(x => {
     const k = String(x.kind || "");
     const high = /keychain|root|kernel.?exec|kernel.?write|kernel privilege|arbitrary code|bypass/i.test(k + " " + String(x.impact || ""));
-    const badge = high
-      ? `<span class="status-pill red">HIGH-VALUE</span>`
-      : `<span class="status-pill amber">${esc(k.slice(0, 24))}</span>`;
-    return `
-    <tr>
-      <td class="mono">${esc(x.cve)}</td>
+    const badge = high ? `<span class="status-pill red">HIGH-VALUE</span>` : `<span class="status-pill amber">${esc(k.slice(0, 24))}</span>`;
+    return `<tr>
+      <td class="mono"><b>${esc(x.cve)}</b></td>
       <td>${esc(x.component)}</td>
       <td>${badge}</td>
       <td class="mono">${esc(String(x.patch || "").slice(0, 30))}</td>
@@ -1196,16 +1485,14 @@ async function pageExploits() {
     <tr><td class="mono"><b>${esc(x.name || x.cve || "")}</b></td><td>${esc(x.match || x.kind || "")}</td>
         <td>${esc(x.hardware || x.component || "")}</td></tr>`).join("");
 
-  const verRows = (() => {
-    const rows = [];
-    for (const v of ["26.0", "26.0.1", "26.1", "26.6", "26.6.1", "27.0"]) {
-      const cell = v.startsWith("27") ? "none public" :
-          (v === "26.0" || v === "26.0.1") ? "Dopamine 3 (A12/A13 + arm64)" : "none public";
-      const cls = cell === "none public" ? "danger" : "green";
-      rows.push(`<tr><td class="mono">${v}</td><td><span class="status-pill ${cls}">${esc(cell)}</span></td></tr>`);
-    }
-    return rows.join("");
-  })();
+  const verRows = [
+    ["26.0", '<span class="status-pill green">Dopamine 3 (A12/A13 + arm64)</span>'],
+    ["26.0.1", '<span class="status-pill green">Dopamine 3 (A12/A13 + arm64)</span>'],
+    ["26.1", '<span class="status-pill gray">none public</span>'],
+    ["26.6", '<span class="status-pill gray">none public</span>'],
+    ["26.6.1", '<span class="status-pill gray">none public</span>'],
+    ["27.0", '<span class="status-pill gray">none public</span>'],
+  ].map(([v, pill]) => `<tr><td class="mono">${v}</td><td>${pill}</td></tr>`).join("");
 
   return `
     <div class="page-title">Public Exploit Catalog & Silicon Exposure Matrix${esc(targetLabel)}</div>
@@ -1223,7 +1510,7 @@ async function pageExploits() {
     <!-- Target Evaluation Card -->
     <div class="panel-card">
       <div class="panel-card-head">Target Device & Silicon Evaluator</div>
-      <div class="filter-bar" style="flex-wrap:wrap;gap:8px;padding:10px 13px">
+      <div class="filter-bar" style="flex-wrap:wrap;gap:8px;padding:10px 14px">
         <span class="mono" style="color:var(--muted)">Target Chip:</span>
         <select class="form-select" id="target-chip" style="width:130px">
           ${chipsList.map(c => `<option value="${c}" ${EXPLOIT_FILTER_CHIP === c ? "selected" : ""}>${c ? c : "All Chips"}</option>`).join("")}
@@ -1234,7 +1521,7 @@ async function pageExploits() {
         <select class="form-select" id="target-layer" style="width:130px">
           ${layersList.map(l => `<option value="${l}" ${EXPLOIT_FILTER_LAYER === l ? "selected" : ""}>${l ? l : "All Layers"}</option>`).join("")}
         </select>
-        <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer;margin-left:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);cursor:pointer;margin-left:8px">
           <input type="checkbox" id="target-nohw" ${EXPLOIT_FILTER_NOHW ? "checked" : ""}> Plain PC+USB Only
         </label>
         <button class="btn primary" onclick="evalExploitsTarget()">Evaluate Target</button>
@@ -1243,59 +1530,53 @@ async function pageExploits() {
     </div>
 
     ${rec.length ? `<div class="panel-card"><div class="panel-card-head">Recommended Acquisition Vectors for ${esc(EXPLOIT_FILTER_CHIP || DEVICE?.chip || "Target")}</div>
-      ${rec.map(s => `<div class="log-event"><span class="dot green"></span><div class="log-body"><div class="log-text">${esc(s.slice(0, 140))}</div></div></div>`).join("")}</div>` : ""}
+      ${rec.map(s => `<div class="log-event"><span class="text-tag success">RECOMMENDED</span><div class="log-body"><div class="log-text">${esc(s.slice(0, 140))}</div></div></div>`).join("")}</div>` : ""}
 
     ${expo.length ? `<div class="panel-card"><div class="panel-card-head">Exposure Assessment (${esc(EXPLOIT_FILTER_CHIP || "Target")} / ${esc(EXPLOIT_FILTER_IOS || "Any")})</div>
       <table class="data"><thead><tr><th>Route / CVE</th><th>Exposure Window</th><th>Hardware / Component</th></tr></thead><tbody>${expoRows}</tbody></table></div>` : ""}
 
     <div class="panel-card">
-      <div class="panel-card-head">Firmware status (26.x-27.x)</div>
-      <table class="data"><thead><tr><th>iOS</th><th>Public route</th></tr></thead><tbody>${verRows}</tbody></table>
+      <div class="panel-card-head">Firmware Status (26.x-27.x)</div>
+      <table class="data"><thead><tr><th>iOS</th><th>Public Route Status</th></tr></thead><tbody>${verRows}</tbody></table>
     </div>
 
     <div class="panel-card">
       <div class="panel-card-head">Routes (${routes.length} cataloged)</div>
-      <div class="filter-bar"><input class="form-input" id="exploit-filter" placeholder="Filter routes (name, tooling, layer)..." style="width:280px" oninput="filterTable('tp-Exploits', this.value)">
-        <button class="btn" onclick="location.hash='exploits';refreshAll()">Refresh</button></div>
+      <div class="filter-bar">
+        <input class="form-input" id="exploit-filter" placeholder="Filter routes by name, tool, or layer..." style="width:300px" oninput="filterTable('tp-Exploits', this.value)">
+        <button class="btn" onclick="CACHE.exploits=null;render()">Refresh</button>
+      </div>
       <table class="data" id="tp-Exploits">
-        <thead><tr><th>Name</th><th>HW Rig</th><th>Layer</th><th>Year</th><th>Chips</th><th>iOS Window</th><th>State</th><th>Tooling</th><th>BFU Impact</th><th>Details</th></tr></thead>
-        <tbody>${routeRows || '<tr><td colspan="10">No routes match the current filters.</td></tr>'}</tbody>
+        <thead><tr><th>Route Name</th><th>Hardware</th><th>Layer</th><th>Year</th><th>Silicon</th><th>iOS Window</th><th>State</th><th>Tooling</th><th>BFU Impact</th><th>Action</th></tr></thead>
+        <tbody>${routeRows}</tbody>
       </table>
     </div>
 
     <div class="panel-card">
-      <div class="panel-card-head">Recent disclosures (${discs.length})</div>
-      <div class="filter-bar"><input class="form-input" id="disc-filter" placeholder="Filter disclosures (CVE, component, kind)..." style="width:300px" oninput="filterTable('tp-Disclosures', this.value)">
-        <span class="mono" style="margin-left:auto">red = high acquisition value</span></div>
-      <table class="data" id="tp-Disclosures"><thead><tr><th>CVE</th><th>Component</th><th>Kind</th><th>Patched</th><th>Impact</th></tr></thead><tbody>${discRows || '<tr><td colspan="5">None catalogued.</td></tr>'}</tbody></table>
+      <div class="panel-card-head">Recent Vulnerability Disclosures (${discs.length} tracked)</div>
+      <table class="data"><thead><tr><th>CVE</th><th>Component</th><th>Impact Severity</th><th>Patch Window</th><th>Technical Detail</th></tr></thead>
+      <tbody>${discRows}</tbody></table>
     </div>`;
 }
 
-let DOCTOR_DATA = null;
-
+/* ---------------- tools & diagnostics ---------------- */
 async function runDoctorCheck() {
-  toast("Running doctor diagnostics...", "blue");
-  try {
-    DOCTOR_DATA = await api("/api/doctor");
-    toast(DOCTOR_DATA.ready ? "Doctor: all systems ready" : `Doctor: ${DOCTOR_DATA.passed}/${DOCTOR_DATA.total} passed`, DOCTOR_DATA.ready ? "green" : "amber");
-  } catch {
-    toast("Doctor diagnostics failed", "red");
-  }
-  render();
+  CACHE.doctor = null;
+  notify("Doctor Diagnostics", "Running host toolchain & workstation health checks...", "info", "SYSTEM");
+  await render();
 }
 
 async function pageTools() {
-  if (!DOCTOR_DATA) {
-    try { DOCTOR_DATA = await api("/api/doctor"); } catch { DOCTOR_DATA = null; }
-  }
-  let tdata = null;
-  try { tdata = await api("/api/tools"); } catch { tdata = null; }
-  let stance = null;
-  try { stance = await api("/api/stance"); } catch { stance = null; }
-  let bfu = null;
-  try { bfu = await api("/api/bfu?chip=" + encodeURIComponent((DEVICE && DEVICE.chip) || "A13") + "&ios=" + encodeURIComponent((DEVICE && DEVICE.ios) || "")); } catch { bfu = null; }
+  if (!CACHE.tools) CACHE.tools = await api("/api/tools");
+  if (!CACHE.doctor) CACHE.doctor = await api("/api/doctor");
+  if (!CACHE.stance) CACHE.stance = await api("/api/stance");
+  if (!CACHE.bfu) CACHE.bfu = await api("/api/bfu?chip=" + encodeURIComponent(DEVICE?.chip || "A13"));
 
-  const doc = DOCTOR_DATA;
+  const tdata = CACHE.tools;
+  const doc = CACHE.doctor;
+  const stance = CACHE.stance;
+  const bfu = CACHE.bfu;
+
   const tools = (tdata && tdata.tools) || [];
   const sum = (tdata && tdata.summary) || {};
   const installed = tools.filter(t => t.installed).length;
@@ -1306,18 +1587,19 @@ async function pageTools() {
     const sm = stance.status_map || {};
     const pill = v => {
       const s = sm[v] || v;
-      const cls = v === "FULL" ? "green" : (v === "NONE" || v === "N/A") ? "" : "amber";
+      const cls = v === "FULL" ? "green" : (v === "NONE" || v === "N/A") ? "gray" : "amber";
       return `<span class="status-pill ${cls}">${esc(s)}</span>`;
     };
-    return `<tr><td>${esc(cap)}</td>${cells.map(c => `<td>${pill(c)}</td>`).join("")}</tr>`;
+    return `<tr><td><b>${esc(cap)}</b></td>${cells.map(c => `<td>${pill(c)}</td>`).join("")}</tr>`;
   }).join("") : "";
 
   const docPill = doc
     ? `<span class="status-pill ${doc.ready ? "green" : "amber"}">${doc.ready ? "ALL CHECKS PASSED" : `${doc.passed}/${doc.total} PASSED`}</span>`
     : "";
 
-  return `<div class="page-head"><div class="page-title">Forensic Toolchain & Workstation Diagnostics</div>
-    <div class="page-sub">Open-source iOS forensic tooling and workstation health check detected live on this machine.</div></div>
+  return `
+    <div class="page-head"><div class="page-title">Forensic Toolchain & Workstation Diagnostics</div>
+    <div class="page-sub">Open-source iOS forensic tooling and workstation health detected live on this host.</div></div>
 
     <!-- Doctor Diagnostics Panel -->
     <div class="panel-card">
@@ -1326,449 +1608,576 @@ async function pageTools() {
         <button class="btn" style="margin-left:auto" onclick="runDoctorCheck()">Re-run Diagnostics</button>
       </div>
       ${doc ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 13px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 14px">
           ${(doc.checks || []).map(c => `
-            <div class="log-event" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px">
-              <span class="dot ${c.ok ? "green" : "amber"}"></span>
+            <div class="log-event" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--panel2)">
+              <span class="text-tag ${c.ok ? "success" : "warning"}">${c.ok ? "PASS" : "WARN"}</span>
               <div class="log-body">
                 <div class="log-text"><b>${esc(c.check)}</b> <span class="mono" style="color:var(--muted);font-size:11px">(${esc(c.detail || (c.ok ? "ok" : "missing"))})</span></div>
               </div>
-              <span class="status-pill ${c.ok ? "green" : "amber"}">${c.ok ? "pass" : "warn"}</span>
             </div>`).join("")}
-        </div>` : '<div class="empty-state">Doctor diagnostics not loaded. Click Re-run Diagnostics.</div>'}
+        </div>` : '<div class="empty-state">Diagnostics not loaded. Click Re-run Diagnostics.</div>'}
     </div>
 
     <!-- Toolchain Metrics -->
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
       ${cats.map(c => { const cc = (sum.by_category && sum.by_category[c]) || {installed:0,total:0};
-        return `<div class="metric-card"><div class="metric-body"><div class="metric-label">${c}</div>
+        return `<div class="metric-card"><div class="metric-body"><div class="metric-label">${c.toUpperCase()}</div>
         <div class="metric-value">${cc.installed}/${cc.total}</div></div></div>`; }).join("")}
     </div>
 
     <div class="panel-card"><div class="panel-card-head">Toolchain (${installed}/${tools.length} installed)</div>
-    <div class="filter-bar"><input class="form-input" id="tool-filter" placeholder="Filter tools..." style="width:260px" oninput="filterTable('tp-Tools', this.value)">
-      <button class="btn" onclick="location.hash='tools';render()">Refresh</button></div>
+    <div class="filter-bar"><input class="form-input" id="tool-filter" placeholder="Filter tools by name or purpose..." style="width:280px" oninput="filterTable('tp-Tools', this.value)">
+      <button class="btn" onclick="CACHE.tools=null;render()">Refresh</button></div>
     <table class="data" id="tp-Tools"><thead><tr><th>Tool</th><th>Category</th><th>Status</th><th>Purpose</th></tr></thead><tbody>
-    ${tools.map(t => `<tr><td><b>${esc(t.name)}</b></td><td><span class="status-pill">${t.cat}</span></td>
-      <td>${t.installed ? '<span class="status-pill green">installed</span>' : '<span class="status-pill amber">missing</span>'}</td>
-      <td>${esc(t.purpose)}</td></tr>`).join("") || '<tr><td colspan="4">No tools data.</td></tr>'}
+    ${tools.map(t => `<tr><td><b>${esc(t.name)}</b></td><td><span class="status-pill gray">${t.cat}</span></td>
+      <td>${t.installed ? '<span class="status-pill green">INSTALLED</span>' : '<span class="status-pill amber">MISSING</span>'}</td>
+      <td>${esc(t.purpose)}</td></tr>`).join("") || '<tr><td colspan="4">No tools data available.</td></tr>'}
     </tbody></table>
-    <div class="log-event"><span class="dot ${installed ? "green" : "amber"}"></span><div class="log-text">Install the missing chain: <span class="mono">sudo ./install.sh --with-checkm8-tools</span> plus apt/pip per tool. Parsing layer (iLEAPP/MEAT/APOLLO/ArtEx/MVT) is optional per-case.</div></div>
     </div>
 
     ${bfu ? `<!-- BFU panel -->
-    <div style="height:14px"></div>
     <div class="panel-card"><div class="panel-card-head">BFU for modern devices (${esc(bfu.playbook.chip)})</div>
     ${bfu.playbook.eligible
-      ? `<div class="log-event"><span class="dot green"></span><div class="log-text">usbliter8 route is public for this chip. Playbook:</div></div>
-         <table class="data"><thead><tr><th>#</th><th>Phase</th><th>Action</th><th>Expect</th></tr></thead><tbody>
-         ${bfu.playbook.steps.map(st => `<tr><td>${st.n}</td><td><span class="status-pill">${st.phase}</span></td><td>${esc(st.cmd)}</td><td>${esc(st.expect)}</td></tr>`).join("")}
+      ? `<div class="log-event"><span class="text-tag success">ELIGIBLE</span><div class="log-body"><div class="log-text">usbliter8 route is public for this chip. Execution Playbook:</div></div></div>
+         <table class="data"><thead><tr><th>#</th><th>Phase</th><th>Action</th><th>Expectation</th></tr></thead><tbody>
+         ${bfu.playbook.steps.map(st => `<tr><td>${st.n}</td><td><span class="status-pill blue">${st.phase}</span></td><td class="mono">${esc(st.cmd)}</td><td>${esc(st.expect)}</td></tr>`).join("")}
          </tbody></table>`
-      : `<div class="log-event"><span class="dot amber"></span><div class="log-text">No public bootrom route for ${esc(bfu.playbook.chip)}. Escrow/paired-computer is the passcode-free path (panel below).</div></div>`}
-    <div class="log-event"><span class="dot amber"></span><div class="log-text">SEP wall: ${esc(bfu.playbook.sep_wall)}</div></div>
+      : `<div class="log-event"><span class="text-tag warning">SEP WALL</span><div class="log-body"><div class="log-text">No public bootrom route for ${esc(bfu.playbook.chip)}. Escrow pairing is the passcode-free recovery path.</div></div></div>`}
+    <div class="log-event"><span class="text-tag info">SEP STATUS</span><div class="log-body"><div class="log-text">SEP wall: ${esc(bfu.playbook.sep_wall)}</div></div></div>
     <div class="filter-bar" style="margin-top:10px">
-      <span class="mono" style="color:#5d6470">escrow find:</span>
-      <input class="form-input" id="escrow-path" placeholder="e.g. /home/jewboy420/cases" style="width:300px" value="${esc((window._lastEscrowPath) || "")}">
-      <button class="btn" onclick="runEscrowFind()">Find escrow records</button>
-      <span class="mono" style="color:#5d6470;margin-left:12px">keybag:</span>
-      <input class="form-input" id="keybag-path" placeholder="path to systembag.kb" style="width:260px" value="">
-      <button class="btn" onclick="runKeybagStatus()">Keybag status</button>
+      <span class="mono" style="color:var(--muted)">escrow find:</span>
+      <input class="form-input" id="escrow-path" placeholder="/home/jewboy420/cases" style="width:260px" value="${esc(ACTIVE_CASE?.destination || "")}">
+      <button class="btn" onclick="runEscrowFind()">Find Escrow Records</button>
+      <span class="mono" style="color:var(--muted);margin-left:10px">keybag:</span>
+      <input class="form-input" id="keybag-path" placeholder="path to systembag.kb" style="width:220px" value="">
+      <button class="btn" onclick="runKeybagStatus()">Keybag Status</button>
     </div>
     <div id="bfu-results" class="log-event" style="display:none;margin-top:8px"><div class="log-body" id="bfu-results-body"></div></div>
     <div class="filter-bar" style="margin-top:10px">
-      <span class="mono" style="color:#5d6470">app DBs:</span>
-      <input class="form-input" id="appcat-path" placeholder="extracted container dir" style="width:300px" value="">
-      <button class="btn" onclick="runAppCatalog()">Discover app databases</button>
-      <span class="mono" style="color:#5d6470;margin-left:12px">escrow unlock:</span>
-      <input class="form-input" id="escrow-record" placeholder="escrow record" style="width:180px" value="">
-      <input class="form-input" id="escrow-backup" placeholder="backup dir" style="width:160px" value="">
-      <input class="form-input" id="escrow-out" placeholder="out dir" style="width:140px" value="">
-      <button class="btn" onclick="runEscrowUnlock()">Unlock backup</button>
+      <span class="mono" style="color:var(--muted)">app DBs:</span>
+      <input class="form-input" id="appcat-path" placeholder="extracted container dir" style="width:260px" value="">
+      <button class="btn" onclick="runAppCatalog()">Discover App Databases</button>
+      <span class="mono" style="color:var(--muted);margin-left:10px">escrow unlock:</span>
+      <input class="form-input" id="escrow-record" placeholder="record.plist" style="width:140px" value="">
+      <input class="form-input" id="escrow-backup" placeholder="backup dir" style="width:130px" value="">
+      <input class="form-input" id="escrow-out" placeholder="out dir" style="width:110px" value="">
+      <button class="btn" onclick="runEscrowUnlock()">Unlock Backup</button>
     </div>
     <div id="bfu-results2" class="log-event" style="display:none;margin-top:8px"><div class="log-body" id="bfu-results-body2"></div></div>
     </div>` : ""}
 
-    ${stance ? `<!-- honest stance vs commercial platforms -->
-    <div style="height:14px"></div>
+    ${stance ? `<!-- Stance vs Commercial -->
     <div class="panel-card"><div class="panel-card-head">Honest stance vs commercial platforms</div>
     <table class="data"><thead><tr><th>Capability</th><th>CoreProbe</th>${stance.competitors.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
     <tbody>${compRows}</tbody></table>
-    <div class="log-event"><span class="dot green"></span><div class="log-text">Full parity on logical / encrypted-with-passcode / checkm8 acquisition and the exploit-catalog workflow. No open-source tool matches Cellebrite BFU/DPA, AXIOM artifact breadth, or iCloud. usbliter8 (A12/A13) is the research path.</div></div>
+    <div class="log-event"><span class="text-tag info">STANDARDS</span><div class="log-body"><div class="log-text">Full parity on logical / encrypted-with-passcode / checkm8 acquisition and exploit cataloging. No open-source tool matches Cellebrite BFU/DPA private hardware.</div></div></div>
     </div>` : ""}`;
 }
 
-const PAGES = {
-  dashboard: pageDashboard, devices: pageDevices, applications: pageApplications,
-  browser: pageBrowser, chats: pageChats, cloud: pageCloud, contacts: pageContacts,
-  calendars: pageCalendars, calls: pageCalls, location: pageLocation, media: pageMedia,
-  messages: pageMessages, files: pageFiles, forensics: pageForensics, reports: pageReports,
-  exploits: pageExploits, tools: pageTools, settings: pageSettings,
-  research: pageResearch, bfu: pageBfuLab, evidence: pageEvidence, artifacts: pageArtifacts,
-};
-async function render() {
-  const h = (location.hash || "#dashboard").slice(1);
-  currentHash = PAGES[h] ? h : "dashboard";
-  buildNav(); navCounts();
-  const bannerPages = ["browser", "chats", "cloud", "contacts", "calendars", "calls",
-                       "location", "media", "messages", "files", "forensics"];
-  const html = await PAGES[currentHash]();
-  document.getElementById("page").innerHTML =
-    (bannerPages.includes(currentHash) ? detectionBanner() : "") + (html || "");
-  document.querySelectorAll("[data-nav]").forEach(el => el.onclick = () => location.hash = el.dataset.nav);
-  renderCasePanel();
-}
-window.addEventListener("hashchange", render);
-
-/* notes autosave */
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("case-notes").addEventListener("input", e => {
-    if (!ACTIVE_CASE) return;
-    clearTimeout(notesTimer);
-    notesTimer = setTimeout(() => {
-      api("/api/case", {method: "POST", body: JSON.stringify({
-        case_id: ACTIVE_CASE.case_id, destination: ACTIVE_CASE.destination, notes: e.target.value})});
-    }, 800);
-  });
-});
-
-async function refreshAll() {
-  const [dev, apps, cases, logr] = await Promise.all([
-    api("/api/device"), api("/api/apps"), api("/api/cases"), api("/api/log")]);
-  DEVICE = dev && !dev.error && dev.udid ? dev : null;
-  APPS = apps || [];
-  if (APPS.length) warmIcons();
-  CASES = cases || [];
-  if (!ACTIVE_CASE && CASES.length) ACTIVE_CASE = CASES[0];
-  ARTIFACTS = {};
-  if (ACTIVE_CASE) ARTIFACTS = await api("/api/artifacts?case=" + encodeURIComponent(ACTIVE_CASE.case_id));
-  ARTIFACTS._log = logr.lines || [];
-  document.getElementById("evidence-count").textContent =
-    ((ARTIFACTS.messages?.length || 0) + (ARTIFACTS.contacts?.length || 0) + (ARTIFACTS.calls?.length || 0)) + " items";
-  // Never wipe the DOM while the user is interacting (checkboxes, inputs,
-  // buttons) or while an auto-exploit run is in progress: update data only,
-  // and re-render just the auto-exploiter pane in place instead.
-  if (AE_INTERACTING || (AEXPLOIT && AEXPLOIT.running)) {
-    const pane = document.getElementById("ae-pane");
-    if (pane) pane.innerHTML = await renderAutoExploitPane(AEXPLOIT);
-    return;
-  }
-  render();
-}
-
-refreshAll();
-setInterval(refreshAll, 8000);
-
-/* BFU panel helpers */
 async function runEscrowFind() {
-  const p = document.getElementById("escrow-path");
-  const body = document.getElementById("bfu-results-body");
-  const wrap = document.getElementById("bfu-results");
-  const path = (p && p.value || "").trim();
-  if (!path) { if (wrap) { wrap.style.display = "block"; body.innerHTML = '<span class="mono">enter a directory path first</span>'; } return; }
-  if (window._lastEscrowPath !== path) window._lastEscrowPath = path;
-  const r = await api("/api/escrow?dir=" + encodeURIComponent(path));
-  const found = (r && r.found) || [];
-  body.innerHTML = found.length
-    ? found.map(f => `<div class="mono">${esc(f.path)} - ${f.keybags.map(b => `${b.type} keybag (${b.classes.filter(c => c.usable_now).length} usable)`) .join(", ") || "raw keybag"}</div>`).join("")
-    : '<span class="mono">no escrow/backup keybags found under this path</span>';
-  wrap.style.display = "block";
+  const p = document.getElementById("escrow-path") || document.getElementById("escrow-dir");
+  const body = document.getElementById("bfu-results-body") || document.getElementById("kb-out");
+  const wrap = document.getElementById("bfu-results") || body;
+  if (!p || !p.value.trim()) { toast("Directory required", "red"); return; }
+  const r = await api("/api/escrow?dir=" + encodeURIComponent(p.value.trim()));
+  const f = r?.found || [];
+  body.innerHTML = `<b>${f.length}</b> escrow record(s) found under ${esc(p.value)}.` +
+    f.map(x => `<div class="mono" style="margin-top:4px">· ${esc(x.file)} [${(x.keybags||[]).map(k=>k.type).join(", ")}]</div>`).join("");
+  if (wrap.style) wrap.style.display = "block";
 }
+
 async function runKeybagStatus() {
-  const p = document.getElementById("keybag-path");
+  const f = document.getElementById("keybag-path");
   const body = document.getElementById("bfu-results-body");
   const wrap = document.getElementById("bfu-results");
-  const path = (p && p.value || "").trim();
-  if (!path) { if (wrap) { wrap.style.display = "block"; body.innerHTML = '<span class="mono">enter a keybag file path first</span>'; } return; }
-  const r = await api("/api/keybag?file=" + encodeURIComponent(path));
-  body.innerHTML = (r && r.ok)
-    ? '<pre class="mono" style="white-space:pre-wrap;font-size:11px;line-height:1.5">' + esc(r.text) + "</pre>"
-    : '<span class="mono">' + esc((r && r.error) || "failed") + "</span>";
+  if (!f || !f.value.trim()) { toast("Path to keybag required", "red"); return; }
+  const r = await api("/api/keybag?file=" + encodeURIComponent(f.value.trim()));
+  body.innerHTML = r?.ok ? `<pre class="mono" style="font-size:11px">${esc(r.text)}</pre>` : `<span class="mono" style="color:var(--red)">${esc(r?.error || "failed")}</span>`;
   wrap.style.display = "block";
 }
 
-/* App DB discovery + escrow unlock (Tools page) */
 async function runAppCatalog() {
   const p = document.getElementById("appcat-path");
   const body = document.getElementById("bfu-results-body2");
-  const wrap = document.getElementById("bfu-results");
-  const path = (p && p.value || "").trim();
-  if (!path) { wrap.style.display = "block"; body.innerHTML = '<span class="mono">enter a container dir path first</span>'; return; }
-  const r = await api("/api/appcatalog?dir=" + encodeURIComponent(path));
-  const dbs = (r && r.databases) || [];
-  body.innerHTML = dbs.length
-    ? `<span class="mono">${dbs.length} database(s) found:</span>` + dbs.map(db =>
-      `<div class="mono" style="margin-top:4px">${esc(db.rel)}${db.app ? ` <span class="status-pill green">${esc(db.app)}</span>` : ""}
-       ${db.tables.map(t => `<div style="margin-left:18px;color:#9aa1ad">${t.rows} rows  ${esc(t.table)}  cols: ${esc((t.columns||[]).slice(0,6).join(", "))}${(t.columns||[]).length > 6 ? "…" : ""}</div>`).join("")}</div>`).join("")
-    : '<span class="mono">no databases found under this path</span>';
+  const wrap = document.getElementById("bfu-results2");
+  if (!p || !p.value.trim()) { toast("Directory required", "red"); return; }
+  const r = await api("/api/appcatalog?dir=" + encodeURIComponent(p.value.trim()));
+  const dbs = r?.databases || [];
+  body.innerHTML = `<b>${dbs.length}</b> database(s) found.` +
+    dbs.map(d => `<div class="mono" style="margin-top:4px">· ${esc(d.rel)} [${esc(d.app || "App")}]</div>`).join("");
   wrap.style.display = "block";
 }
+
 async function runEscrowUnlock() {
   const rec = document.getElementById("escrow-record");
   const bk = document.getElementById("escrow-backup");
   const out = document.getElementById("escrow-out");
   const body = document.getElementById("bfu-results-body2");
-  const wrap = document.getElementById("bfu-results");
-  if (!(rec && rec.value && bk && bk.value && out && out.value)) {
-    wrap.style.display = "block"; body.innerHTML = '<span class="mono">record, backup, and out paths are all required</span>'; return;
+  const wrap = document.getElementById("bfu-results2");
+  if (!rec || !rec.value || !bk || !bk.value || !out || !out.value) {
+    toast("Record, backup, and output paths are all required", "red");
+    return;
   }
   const q = "record=" + encodeURIComponent(rec.value.trim()) + "&backup=" + encodeURIComponent(bk.value.trim()) + "&out=" + encodeURIComponent(out.value.trim());
   const r = await api("/api/escrow/unlock?" + q);
-  body.innerHTML = r && r.ok
-    ? `<span class="status-pill green">DECRYPTED</span> <span class="mono">${esc(r.decrypted)}</span>`
-    : `<span class="status-pill red">FAILED</span> <span class="mono">${esc((r && r.error) || "unknown error")}</span>`;
+  body.innerHTML = r?.ok ? `<span class="status-pill green">DECRYPTED</span> <span class="mono">${esc(r.decrypted)}</span>` : `<span class="status-pill red">FAILED</span> <span class="mono">${esc(r?.error || "failed")}</span>`;
   wrap.style.display = "block";
 }
 
-/* ---------------- Research page ---------------- */
+/* ---------------- research ---------------- */
 let CAMPAIGN = null;
 async function pageResearch() {
-  try { CAMPAIGN = await api("/api/campaign"); } catch { CAMPAIGN = null; }
-  let SURF = null;
-  try { SURF = await api("/api/surface"); } catch { SURF = null; }
+  if (!CAMPAIGN) CAMPAIGN = await api("/api/campaign");
+  if (!CACHE.surface) CACHE.surface = await api("/api/surface");
+
+  const SURF = CACHE.surface;
   const surfRows = (SURF && SURF.targets) || [];
   const surfHtml = surfRows.length ? `
-    <div class="panel-card"><div class="panel-card-head">Attack-surface targets (from ${(SURF.analysis && SURF.analysis.total) || 0} tracked CVEs)</div>
-    ${surfRows.map(t => `<div class="log-event"><span class="dot amber"></span><div class="log-text">
+    <div class="panel-card"><div class="panel-card-head">Attack-Surface Targets (from ${(SURF.analysis && SURF.analysis.total) || 0} Tracked CVEs)</div>
+    ${surfRows.map(t => `<div class="log-event"><span class="text-tag warning">SURFACE</span><div class="log-body"><div class="log-text">
       <b>${esc(t.component)}</b> (${t.cves} CVEs) ${t.prime_examples.length ? "&middot; PRIME: " + esc(t.prime_examples.join(", ")) : ""}
-      ${t.high_examples.length ? "&middot; HIGH: " + esc(t.high_examples.join(", ")) : ""}</div></div>`).join("")}
-    <div class="log-event"><span class="dot amber"></span><div class="log-text">These are PATCHED CVEs - the surface map. New usable 0-days come only from campaign sessions (repro + writeup).</div></div></div>
-    <div style="height:14px"></div>` : "";
+      ${t.high_examples.length ? "&middot; HIGH: " + esc(t.high_examples.join(", ")) : ""}</div></div></div>`).join("")}
+    </div>` : "";
+
   const camps = (CAMPAIGN && CAMPAIGN.campaigns) || {};
   const leads = (CAMPAIGN && CAMPAIGN.leads) || [];
   const campRows = Object.entries(camps).map(([id, c]) =>
-    `<tr><td class="mono">${esc(c.name)}</td><td>${esc(c.target)}</td><td>${esc(c.chip || "—")}</td>
+    `<tr><td class="mono"><b>${esc(c.name)}</b></td><td>${esc(c.target)}</td><td>${esc(c.chip || "—")}</td>
      <td class="mono">${esc(c.ios || "—")}</td><td class="mono">${c.sessions}</td><td class="mono">${c.leads || 0}</td></tr>`).join("")
-    || '<tr><td colspan="6">No campaigns yet.</td></tr>';
+    || '<tr><td colspan="6" class="empty-state">No research campaigns created yet.</td></tr>';
+
   const leadRows = leads.slice().reverse().map(l => {
-    const cls = l.verdict === "finding" ? "red" : l.verdict === "escalated" || l.verdict === "promising" ? "amber" : "";
+    const cls = l.verdict === "finding" ? "red" : l.verdict === "escalated" || l.verdict === "promising" ? "amber" : "gray";
     return `<tr><td class="mono">${esc(l.id)}</td><td>${esc(l.kind)}</td>
       <td><span class="status-pill ${cls}">${esc(l.verdict)}</span></td>
       <td>${esc(l.detail.slice(0, 90))}</td>
-      <td><button class="btn" onclick="triageLead('${esc(l.id)}','promising')">●</button>
-          <button class="btn" onclick="triageLead('${esc(l.id)}','dead-end')">·</button>
-          <button class="btn" onclick="triageLead('${esc(l.id)}','escalated')">▲</button></td></tr>`;
-  }).join("") || '<tr><td colspan="5">No leads yet - run a capture + dry session.</td></tr>';
-  return `<div class="page-head"><div class="page-title">Zero-Day Research</div>
-    <div class="page-sub">Campaign orchestrator: DFU captures -> traces -> fuzz sessions -> leads -> verdicts. Honest instrumentation: findings require reproduction + public writeup.</div></div>
+      <td>
+        <button class="btn" style="padding:2px 7px;font-size:10px" onclick="triageLead('${esc(l.id)}','promising')">Promising</button>
+        <button class="btn" style="padding:2px 7px;font-size:10px" onclick="triageLead('${esc(l.id)}','dead-end')">Dead-End</button>
+        <button class="btn" style="padding:2px 7px;font-size:10px" onclick="triageLead('${esc(l.id)}','escalated')">Escalate</button>
+      </td></tr>`;
+  }).join("") || '<tr><td colspan="5" class="empty-state">No research leads recorded.</td></tr>';
+
+  return `
+    <div class="page-head"><div class="page-title">Zero-Day Research</div>
+    <div class="page-sub">Campaign orchestrator: DFU captures -> traces -> fuzz sessions -> leads -> verdicts. Honest instrumentation.</div></div>
     ${surfHtml}
     <div class="panel-card"><div class="panel-card-head">Campaigns</div>
     <div class="filter-bar">
       <input class="form-input" id="cp-name" placeholder="campaign name" style="width:180px">
       <input class="form-input" id="cp-chip" placeholder="chip (A13)" style="width:100px">
       <input class="form-input" id="cp-ios" placeholder="iOS" style="width:90px">
-      <button class="btn" onclick="newCampaign()">New campaign</button>
-      <span class="mono" style="color:#5d6470;margin-left:10px">capture text:</span>
-      <input class="form-input" id="cp-capture-file" placeholder="usbmon capture (paste below)" style="width:260px">
+      <button class="btn primary" onclick="newCampaign()">New Campaign</button>
     </div>
-    <textarea id="cp-capture" class="notes-input" style="width:100%;height:110px;margin-top:8px" placeholder="Paste usbmon text (dfu-usbmon.sh output) here, then pick a campaign and Run dry session"></textarea>
-    <div class="filter-bar" style="margin-top:8px">
-      <select class="form-input" id="cp-select">${Object.keys(camps).map(id => `<option value="${esc(id)}">${esc(camps[id].name)}</option>`).join("") || '<option value="">(create one first)</option>'}</select>
-      <button class="btn" onclick="dryRun()">Run dry session</button>
-      <span class="mono" style="color:#5d6470">then: opensleuth campaign run &lt;id&gt; --capture f.txt (live fuzz)</span>
+    <div style="padding:10px 14px">
+      <textarea id="cp-capture" class="notes-input" style="width:100%;height:100px" placeholder="Paste usbmon capture text here, select campaign below, and run dry session..."></textarea>
+    </div>
+    <div class="filter-bar">
+      <select class="form-select" id="cp-select">${Object.keys(camps).map(id => `<option value="${esc(id)}">${esc(camps[id].name)}</option>`).join("") || '<option value="">(create a campaign first)</option>'}</select>
+      <button class="btn" onclick="dryRun()">Run Dry Session</button>
     </div>
     <table class="data"><thead><tr><th>Name</th><th>Target</th><th>Chip</th><th>iOS</th><th>Sessions</th><th>Leads</th></tr></thead>
     <tbody>${campRows}</tbody></table></div>
-    <div style="height:14px"></div>
+
     <div class="panel-card"><div class="panel-card-head">Leads (${leads.length})</div>
-    <table class="data"><thead><tr><th>ID</th><th>Kind</th><th>Verdict</th><th>Detail</th><th>Triage</th></tr></thead>
+    <table class="data"><thead><tr><th>ID</th><th>Kind</th><th>Verdict</th><th>Detail</th><th>Triage Action</th></tr></thead>
     <tbody>${leadRows}</tbody></table>
-    <div class="log-event"><span class="dot amber"></span><div class="log-text">Ladder: observed → promising (repro) → escalated (root cause) → finding (public writeup). Nothing enters the exploit catalog without a public writeup.</div></div></div>`;
+    <div class="log-event"><span class="text-tag info">LADDER</span><div class="log-body"><div class="log-text">Triage ladder: observed → promising (repro) → escalated (root cause) → finding (public writeup).</div></div></div>
+    </div>`;
 }
+
 async function newCampaign() {
   const name = document.getElementById("cp-name").value.trim();
-  if (!name) { toast("campaign name required", "red"); return; }
-  const r = await api("/api/campaign", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({action: "new", name, chip: document.getElementById("cp-chip").value,
-                          ios: document.getElementById("cp-ios").value, target: "DFU"})});
-  toast(r.ok ? "campaign created" : (r.error || "failed"), r.ok ? "green" : "red");
-  if (r.ok) render();
+  if (!name) { toast("Campaign name required", "red"); return; }
+  const r = await api("/api/campaign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "new", name, chip: document.getElementById("cp-chip").value, ios: document.getElementById("cp-ios").value, target: "DFU" }),
+  });
+  if (r.ok) {
+    CAMPAIGN = null;
+    notify("Campaign Created", `New campaign '${name}' initialized.`, "success", "EXPLOIT");
+    render();
+  } else toast(r.error || "failed", "red");
 }
+
 async function dryRun() {
   const id = document.getElementById("cp-select").value;
   const capture = document.getElementById("cp-capture").value;
-  if (!id || !capture.trim()) { toast("campaign + capture text required", "red"); return; }
-  const r = await api("/api/campaign", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({action: "dry-run", campaign_id: id, capture})});
-  toast(r.ok ? `session ${r.session.id}: ${r.anomalies.length} anomalies` : (r.error || "failed"), r.ok ? "green" : "red");
-  if (r.ok) render();
-}
-async function triageLead(id, verdict) {
-  const r = await api("/api/campaign", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({action: "triage", lead_id: id, verdict})});
-  toast(r.ok ? `${id} → ${verdict}` : (r.error || "failed"), r.ok ? "green" : "red");
-  if (r.ok) render();
+  if (!id || !capture.trim()) { toast("Campaign selection and capture text required", "red"); return; }
+  const r = await api("/api/campaign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "dry-run", campaign_id: id, capture }),
+  });
+  if (r.ok) {
+    CAMPAIGN = null;
+    notify("Dry Session Analyzed", `Session analyzed: ${r.anomalies?.length || 0} anomalies found.`, "success", "EXPLOIT");
+    render();
+  } else toast(r.error || "failed", "red");
 }
 
-/* ---------------- BFU Lab page ---------------- */
+async function triageLead(id, verdict) {
+  const r = await api("/api/campaign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "triage", lead_id: id, verdict }),
+  });
+  if (r.ok) {
+    CAMPAIGN = null;
+    notify("Lead Triaged", `${id} marked as ${verdict}`, "info", "EXPLOIT");
+    render();
+  } else toast(r.error || "failed", "red");
+}
+
+/* ---------------- bfu lab ---------------- */
 async function pageBfuLab() {
-  return `<div class="page-head"><div class="page-title">BFU Lab (modern phones)</div>
-    <div class="page-sub">Works on ANY model: FS class intelligence, keybag analysis, our own decrypt engine.</div></div>
+  return `<div class="page-head"><div class="page-title">BFU Lab (Modern Phones)</div>
+    <div class="page-sub">Works on ANY iOS model: Filesystem class intelligence, keybag status, and native decrypt engine.</div></div>
     <div class="panel-card"><div class="panel-card-head">Filesystem intelligence (bfufs)</div>
     <div class="filter-bar">
-      <input class="form-input" id="bfu-fs-path" placeholder="BFU-mounted or pulled root" style="width:320px">
-      <button class="btn" onclick="runBfuFs()">Scan classes</button>
+      <input class="form-input" id="bfu-fs-path" placeholder="BFU mounted or pulled root path" style="width:340px" value="${esc(ACTIVE_CASE?.destination ? ACTIVE_CASE.destination + "/bfu" : "")}">
+      <button class="btn primary" onclick="runBfuFs()">Scan Classes</button>
     </div>
-    <div id="bfu-fs-out" style="margin-top:8px"></div></div>
-    <div style="height:14px"></div>
+    <div id="bfu-fs-out" style="padding:10px 14px;display:none"></div></div>
+
     <div class="panel-card"><div class="panel-card-head">Keybag tools</div>
     <div class="filter-bar">
-      <input class="form-input" id="kb-file" placeholder="keybag / Manifest.plist" style="width:280px">
-      <button class="btn" onclick="runKeybagUI()">Keybag status</button>
-      <input class="form-input" id="escrow-dir" placeholder="case dir (escrow find)" style="width:220px">
-      <button class="btn" onclick="runEscrowFind()">Escrow find</button>
+      <input class="form-input" id="kb-file" placeholder="Path to systembag.kb / Manifest.plist" style="width:300px">
+      <button class="btn" onclick="runKeybagUI()">Keybag Status</button>
+      <input class="form-input" id="escrow-dir" placeholder="Case directory for escrow search" style="width:240px" value="${esc(ACTIVE_CASE?.destination || "")}">
+      <button class="btn" onclick="runEscrowFind()">Escrow Find</button>
     </div>
-    <div id="kb-out" style="margin-top:8px"></div></div>`;
+    <div id="kb-out" style="padding:10px 14px;display:none"></div></div>`;
 }
+
 async function runBfuFs() {
   const p = document.getElementById("bfu-fs-path").value.trim();
   const out = document.getElementById("bfu-fs-out");
-  if (!p) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
+  if (!p) { toast("Path required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Scanning filesystem DataProtection classes...</span>';
   const r = await api("/api/bfufs?dir=" + encodeURIComponent(p));
-  const s = (r && r.summary) || {};
+  const s = r?.summary || {};
   out.innerHTML = `
-    <div class="log-event"><span class="dot ${s.content_readable ? "green" : "amber"}"></span>
-    <div class="log-text"><b>${s.total_files || 0}</b> files · <b>${s.content_readable || 0}</b> plaintext-readable at BFU ·
-    <b>${s.metadata_visible || 0}</b> metadata-only · interest: ${esc(JSON.stringify(s.by_interest || {}))}</div></div>
-    ${(r.readable || []).slice(0, 25).map(f => `<div class="mono" style="padding-left:14px">+ ${esc(f.rel)}</div>`).join("")}
-    ${(r.targets || []).slice(0, 25).map(f => `<div class="mono" style="padding-left:14px;color:#9aa1ad">· ${esc(f.rel)} [${esc(f.interest || "—")}]</div>`).join("")}`;
+    <div class="log-event"><span class="text-tag ${s.content_readable ? "success" : "warning"}">SCAN RESULT</span>
+    <div class="log-text"><b>${s.total_files || 0}</b> files scanned · <b>${s.content_readable || 0}</b> plaintext-readable at BFU · <b>${s.metadata_visible || 0}</b> metadata-only.</div></div>
+    ${(r.readable || []).slice(0, 20).map(f => `<div class="mono" style="padding-left:14px;color:#34d399">+ ${esc(f.rel)}</div>`).join("")}
+    ${(r.targets || []).slice(0, 20).map(f => `<div class="mono" style="padding-left:14px;color:var(--muted)">· ${esc(f.rel)} [${esc(f.interest || "class")}]</div>`).join("")}
+  `;
 }
+
 async function runKeybagUI() {
   const f = document.getElementById("kb-file").value.trim();
   const out = document.getElementById("kb-out");
-  if (!f) { out.innerHTML = '<span class="mono">enter a keybag path</span>'; return; }
+  if (!f) { toast("Keybag file required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Parsing keybag...</span>';
   const r = await api("/api/keybag?file=" + encodeURIComponent(f));
-  out.innerHTML = (r && r.ok)
-    ? `<pre class="mono" style="white-space:pre-wrap;font-size:11px">${esc(r.text)}</pre>`
-    : `<span class="mono">${esc((r && r.error) || "failed")}</span>`;
+  out.innerHTML = r?.ok ? `<pre class="mono" style="white-space:pre-wrap;font-size:11px">${esc(r.text)}</pre>` : `<span class="mono" style="color:var(--red)">${esc(r?.error || "failed")}</span>`;
 }
 
-/* ---------------- Evidence page ---------------- */
+/* ---------------- evidence ---------------- */
 async function pageEvidence() {
-  return `<div class="page-head"><div class="page-title">Evidence & Chain of Custody</div>
-    <div class="page-sub">Certify a case directory (native hashing + HMAC seal) and verify integrity.</div></div>
-    <div class="panel-card"><div class="panel-card-head">Certify a case directory</div>
+  return `
+    <div class="page-head"><div class="page-title">Evidence & Chain of Custody</div>
+    <div class="page-sub">Certify a case directory (native multi-hashing + HMAC seal) and verify evidentiary integrity.</div></div>
+    <div class="panel-card"><div class="panel-card-head">Certify a Case Directory</div>
     <div class="filter-bar">
-      <input class="form-input" id="cert-dir" placeholder="case directory" style="width:280px">
-      <input class="form-input" id="cert-out" placeholder="output dir" style="width:200px">
-      <input class="form-input" id="cert-examiner" placeholder="examiner name" style="width:160px">
-      <button class="btn" onclick="runCertify()">Certify + seal</button>
+      <input class="form-input" id="cert-dir" placeholder="Case directory to seal" style="width:280px" value="${esc(ACTIVE_CASE?.destination || "")}">
+      <input class="form-input" id="cert-out" placeholder="Output folder" style="width:200px" value="${esc(ACTIVE_CASE?.destination ? ACTIVE_CASE.destination + "/report" : "")}">
+      <input class="form-input" id="cert-examiner" placeholder="examiner name" style="width:160px" value="${esc(ACTIVE_CASE?.examiner || "Forensic Examiner")}">
+      <button class="btn primary" onclick="runCertify()">Certify + Seal</button>
     </div></div>
-    <div style="height:14px"></div>
-    <div class="panel-card"><div class="panel-card-head">Verify a sealed report</div>
+
+    <div class="panel-card"><div class="panel-card-head">Verify a Sealed Report</div>
     <div class="filter-bar">
-      <input class="form-input" id="cert-report" placeholder="sealed-report.json path" style="width:340px">
-      <button class="btn" onclick="runCertVerify()">Verify integrity</button>
-      <span class="mono" style="color:#5d6470">create: opensleuth certify &lt;case&gt; --out &lt;dir&gt; --examiner "Name"</span>
+      <input class="form-input" id="cert-report" placeholder="Path to sealed-report.json" style="width:360px">
+      <button class="btn" onclick="runCertVerify()">Verify Integrity</button>
     </div>
-    <div id="cert-out" style="margin-top:8px"></div></div>`;
-}
-async function runCertVerify() {
-  const f = document.getElementById("cert-report").value.trim();
-  const out = document.getElementById("cert-out");
-  if (!f) { out.innerHTML = '<span class="mono">enter a report path</span>'; return; }
-  const r = await api("/api/certify?verify=" + encodeURIComponent(f));
-  if (!r || r.error) { out.innerHTML = `<span class="mono">${esc((r && r.error) || "failed")}</span>`; return; }
-  out.innerHTML = `<div class="log-event"><span class="dot ${r.integrity_ok ? "green" : "red"}"></span>
-    <div class="log-text">seal ${r.seal_valid ? "VALID" : "INVALID"} · ${r.file_count} files · tampered ${r.tampered}
-    ${r.tampered ? r.failures.map(x => `<div class="mono">${esc(x.status)} ${esc(x.relpath)}</div>`).join("") : ""}</div></div>`;
+    <div id="cert-out" style="padding:10px 14px;display:none"></div></div>`;
 }
 
-/* ---------------- Artifacts page ---------------- */
-async function pageArtifacts() {
-  return `<div class="page-head"><div class="page-title">Artifact Analysis</div>
-    <div class="page-sub">Crash logs (.ips), wireless artifacts (WiFi/BT), and the merged super-timeline.</div></div>
-    <div class="panel-card"><div class="panel-card-head">Scan a pull/backup root</div>
-    <div class="filter-bar">
-      <input class="form-input" id="art-dir" placeholder="extraction root (e.g. ~/cases/C1/extraction)" style="width:340px">
-      <button class="btn" onclick="runCrashLogs()">Crash logs</button>
-      <button class="btn" onclick="runWireless()">Wireless</button>
-      <button class="btn" onclick="runSysdiagnose()">Sysdiagnose</button>
-      <button class="btn" onclick="runKnowledgeC()">knowledgeC</button>
-      <button class="btn" onclick="runSuperTimeline()">Super-timeline</button>
-    </div>
-    <div id="art-out" style="margin-top:10px"></div></div>`;
-}
-async function runCrashLogs() {
-  const d = document.getElementById("art-dir").value.trim();
-  const out = document.getElementById("art-out");
-  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
-  const r = await api("/api/crashlogs?dir=" + encodeURIComponent(d));
-  const s = (r && r.summary) || {};
-  const rows = (r && r.crashes) || [];
-  out.innerHTML = `
-    <div class="log-event"><span class="dot ${rows.length ? "green" : "amber"}"></span>
-    <div class="log-text"><b>${s.total || 0}</b> crash logs · by process ${esc(JSON.stringify(s.by_process || {}))}</div></div>
-    ${rows.slice(0, 20).map(c => `<div class="mono" style="padding-left:14px">· ${esc(c.timestamp || "?")} ${esc(c.process || c.name)} [${esc(c.exception_type || "?")}]</div>`).join("")}`;
-}
-async function runWireless() {
-  const d = document.getElementById("art-dir").value.trim();
-  const out = document.getElementById("art-out");
-  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
-  const r = await api("/api/wireless?dir=" + encodeURIComponent(d));
-  const wifi = (r && r.wifi) || [], bt = (r && r.bluetooth) || [];
-  out.innerHTML = `
-    <div class="log-event"><span class="dot ${wifi.length || bt.length ? "green" : "amber"}"></span>
-    <div class="log-text"><b>${wifi.length}</b> WiFi networks · <b>${bt.length}</b> Bluetooth entries</div></div>
-    ${wifi.slice(0, 15).map(w => `<div class="mono" style="padding-left:14px">wifi: ${esc(w.ssid || w.network_id)} ${w.bssid ? "· " + esc(w.bssid) : ""} · ${esc(w.security || "?")}</div>`).join("")}
-    ${bt.slice(0, 15).map(b => `<div class="mono" style="padding-left:14px">bt: ${esc(b.name || b.address || "?")} ${b.paired ? "· paired" : "· recent"}</div>`).join("")}`;
-}
-async function runSysdiagnose() {
-  const d = document.getElementById("art-dir").value.trim();
-  const out = document.getElementById("art-out");
-  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
-  const r = await api("/api/sysdiagnose?dir=" + encodeURIComponent(d));
-  const cat = (r && r.by_category) || {};
-  const files = (r && r.files) || [];
-  out.innerHTML = `
-    <div class="log-event"><span class="dot ${r.total ? "green" : "amber"}"></span>
-    <div class="log-text"><b>${r.total || 0}</b> files inventoried${r.root ? " · " + esc(r.root) : ""}</div></div>
-    ${Object.entries(cat).sort((a, b) => b[1].length - a[1].length).map(([k, v]) =>
-      `<div class="mono" style="padding-left:14px">· ${esc(k)}: ${v.length} file${v.length == 1 ? "" : "s"}</div>`).join("")}
-    ${files.filter(f => f.category).slice(0, 12).map(f =>
-      `<div class="mono" style="padding-left:14px;opacity:.75">· ${esc(f.relpath)}</div>`).join("")}`;
-}
-async function runKnowledgeC() {
-  const d = document.getElementById("art-dir").value.trim();
-  const out = document.getElementById("art-out");
-  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
-  const r = await api("/api/knowledgec?dir=" + encodeURIComponent(d));
-  const ev = (r && r.events) || [], top = (r && r.top_apps) || {};
-  out.innerHTML = `
-    <div class="log-event"><span class="dot ${ev.length ? "green" : "amber"}"></span>
-    <div class="log-text"><b>${ev.length}</b> knowledgeC events · top apps ${esc(JSON.stringify(top))}</div></div>
-    ${ev.slice(0, 25).map(e =>
-      `<div class="mono" style="padding-left:14px">· ${esc(e.ts || "?")} [${esc(e.kind || "?")}] ${esc(e.value || "")}</div>`).join("")}`;
-}
-async function runSuperTimeline() {
-  const d = document.getElementById("art-dir").value.trim();
-  const out = document.getElementById("art-out");
-  if (!d) { out.innerHTML = '<span class="mono">enter a path</span>'; return; }
-  // reuse dump pipeline: /api/artifacts expects case; use bfufs-style dir scan via timeline on files
-  const r = await api("/api/appcatalog?dir=" + encodeURIComponent(d));
-  const dbs = (r && r.databases) || [];
-  if (!dbs.length) { out.innerHTML = '<span class="mono">no timestamped sources found; run parsers first (opensleuth timeline input.json)</span>'; return; }
-  out.innerHTML = `<div class="log-event"><span class="dot green"></span><div class="log-text">
-    <b>${dbs.length}</b> databases found. CLI: <span class="mono">python3 -m opensleuth timeline artifacts.json --out timeline.csv</span></div></div>` +
-    dbs.slice(0, 15).map(db => `<div class="mono" style="padding-left:14px">· ${esc(db.rel)} ${db.app ? "[" + esc(db.app) + "]" : ""}</div>`).join("");
-}
-
-/* certify create (Evidence page) */
 async function runCertify() {
   const dir = document.getElementById("cert-dir").value.trim();
   const out = document.getElementById("cert-out").value.trim();
   const examiner = document.getElementById("cert-examiner").value.trim();
-  if (!dir || !out || !examiner) { toast("dir, out, and examiner required", "red"); return; }
-  const r = await api("/api/certify", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({case_dir: dir, out, examiner})});
+  if (!dir || !out || !examiner) { toast("Case directory, output directory, and examiner name are required", "red"); return; }
+  notify("Certification Started", `Computing multi-hashes for ${dir}...`, "info", "EVIDENCE");
+  const r = await api("/api/certify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ case_dir: dir, out, examiner }),
+  });
   if (r && !r.error) {
-    toast(`certified ${r.file_count} files`, "green");
+    notify("Certified Successfully", `Certified ${r.file_count} evidence files with cryptographic seal.`, "success", "EVIDENCE");
   } else {
-    toast((r && r.error) || "failed", "red");
+    notify("Certification Error", r?.error || "Failed", "error", "EVIDENCE");
   }
 }
 
-// mark interaction on ANY control so the 8s auto-refresh never fights the
-// user (checkboxes stay checked, inputs keep focus/text)
-document.addEventListener("click", () => markInteracting(), true);
-document.addEventListener("input", () => markInteracting(), true);
-document.addEventListener("change", () => markInteracting(), true);
+async function runCertVerify() {
+  const f = document.getElementById("cert-report").value.trim();
+  const out = document.getElementById("cert-out");
+  if (!f) { toast("Report path required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Verifying seal integrity...</span>';
+  const r = await api("/api/certify?verify=" + encodeURIComponent(f));
+  if (!r || r.error) { out.innerHTML = `<span class="mono" style="color:var(--red)">${esc(r?.error || "failed")}</span>`; return; }
+  out.innerHTML = `
+    <div class="log-event"><span class="text-tag ${r.integrity_ok ? "success" : "error"}">${r.integrity_ok ? "VERIFIED" : "TAMPERED"}</span>
+    <div class="log-text">Seal ${r.seal_valid ? "VALID" : "INVALID"} · ${r.file_count} files verified · ${r.tampered || 0} tampered files.
+    ${r.tampered ? (r.failures || []).map(x => `<div class="mono" style="color:var(--red)">${esc(x.status)}: ${esc(x.relpath)}</div>`).join("") : ""}
+    </div></div>`;
+}
+
+/* ---------------- artifacts ---------------- */
+async function pageArtifacts() {
+  return `
+    <div class="page-head"><div class="page-title">Artifact Analysis</div>
+    <div class="page-sub">Crash logs (.ips), wireless registries (WiFi/Bluetooth), and merged super-timeline.</div></div>
+    <div class="panel-card"><div class="panel-card-head">Scan Extraction Directory</div>
+    <div class="filter-bar">
+      <input class="form-input" id="art-dir" placeholder="Extraction root path" style="width:360px" value="${esc(ACTIVE_CASE?.destination || "")}">
+      <button class="btn" onclick="runCrashLogs()">Crash Logs</button>
+      <button class="btn" onclick="runWireless()">Wireless</button>
+      <button class="btn" onclick="runSysdiagnose()">Sysdiagnose</button>
+      <button class="btn" onclick="runKnowledgeC()">knowledgeC</button>
+      <button class="btn primary" onclick="runSuperTimeline()">Super-timeline</button>
+    </div>
+    <div id="art-out" style="padding:10px 14px;display:none"></div></div>`;
+}
+
+async function runCrashLogs() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { toast("Path required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Scanning crash logs...</span>';
+  const r = await api("/api/crashlogs?dir=" + encodeURIComponent(d));
+  const s = r?.summary || {};
+  const rows = r?.crashes || [];
+  out.innerHTML = `
+    <div class="log-event"><span class="text-tag ${rows.length ? "success" : "warning"}">CRASH LOGS</span>
+    <div class="log-text"><b>${s.total || 0}</b> crash logs analyzed.</div></div>
+    ${rows.slice(0, 15).map(c => `<div class="mono" style="padding-left:14px">· ${esc(c.timestamp || "?")} ${esc(c.process || c.name)} [${esc(c.exception_type || "crash")}]</div>`).join("")}`;
+}
+
+async function runWireless() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { toast("Path required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Scanning wireless artifacts...</span>';
+  const r = await api("/api/wireless?dir=" + encodeURIComponent(d));
+  const wifi = r?.wifi || [], bt = r?.bluetooth || [];
+  out.innerHTML = `
+    <div class="log-event"><span class="text-tag ${wifi.length || bt.length ? "success" : "warning"}">WIRELESS</span>
+    <div class="log-text"><b>${wifi.length}</b> WiFi networks · <b>${bt.length}</b> Bluetooth devices.</div></div>
+    ${wifi.slice(0, 10).map(w => `<div class="mono" style="padding-left:14px">WiFi: ${esc(w.ssid || w.network_id)} · ${esc(w.security || "?")}</div>`).join("")}
+    ${bt.slice(0, 10).map(b => `<div class="mono" style="padding-left:14px">BT: ${esc(b.name || b.address || "?")} ${b.paired ? "(paired)" : ""}</div>`).join("")}`;
+}
+
+async function runSysdiagnose() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { toast("Path required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Scanning sysdiagnose...</span>';
+  const r = await api("/api/sysdiagnose?dir=" + encodeURIComponent(d));
+  out.innerHTML = `
+    <div class="log-event"><span class="text-tag info">SYSDIAGNOSE</span>
+    <div class="log-text"><b>${r.total || 0}</b> diagnostics files inventoried.</div></div>`;
+}
+
+async function runKnowledgeC() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { toast("Path required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Parsing knowledgeC database...</span>';
+  const r = await api("/api/knowledgec?dir=" + encodeURIComponent(d));
+  const ev = r?.events || [];
+  out.innerHTML = `
+    <div class="log-event"><span class="text-tag ${ev.length ? "success" : "warning"}">KNOWLEDGEC</span>
+    <div class="log-text"><b>${ev.length}</b> events extracted.</div></div>
+    ${ev.slice(0, 20).map(e => `<div class="mono" style="padding-left:14px">· ${esc(e.ts || "?")} [${esc(e.kind || "")}] ${esc(e.value || "")}</div>`).join("")}`;
+}
+
+async function runSuperTimeline() {
+  const d = document.getElementById("art-dir").value.trim();
+  const out = document.getElementById("art-out");
+  if (!d) { toast("Path required", "red"); return; }
+  out.style.display = "block";
+  out.innerHTML = '<span class="mono">Generating super-timeline...</span>';
+  notify("Super-Timeline", `Generating chronological timeline for ${ACTIVE_CASE?.case_id || "extraction"}...`, "info", "FORENSICS");
+  const r = await api("/api/timeline", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ case_id: ACTIVE_CASE?.case_id || "" }),
+  });
+  if (r.ok) {
+    out.innerHTML = `<div class="log-event"><span class="text-tag success">TIMELINE READY</span><div class="log-text">Super-timeline generated: <span class="mono">${esc(r.path)}</span></div></div>`;
+    notify("Super-Timeline Generated", "Chronological evidence timeline generated successfully.", "success", "FORENSICS");
+  } else {
+    // fallback to dir appcatalog check
+    const r2 = await api("/api/appcatalog?dir=" + encodeURIComponent(d));
+    const dbs = r2?.databases || [];
+    out.innerHTML = `<div class="log-event"><span class="text-tag info">INDEXED</span><div class="log-text"><b>${dbs.length}</b> timestamped databases cataloged. Run timeline command to export CSV.</div></div>`;
+  }
+}
+
+/* ---------------- pages dispatch table ---------------- */
+const PAGES = {
+  dashboard: pageDashboard,
+  devices: pageDevices,
+  applications: pageApplications,
+  browser: pageBrowser,
+  chats: pageChats,
+  cloud: pageCloud,
+  contacts: pageContacts,
+  calendars: pageCalendars,
+  calls: pageCalls,
+  location: pageLocation,
+  media: pageMedia,
+  messages: pageMessages,
+  files: pageFiles,
+  forensics: pageForensics,
+  reports: pageReports,
+  exploits: pageExploits,
+  tools: pageTools,
+  settings: pageSettings,
+  research: pageResearch,
+  bfu: pageBfuLab,
+  evidence: pageEvidence,
+  artifacts: pageArtifacts,
+};
+
+async function render() {
+  const h = (location.hash || "#dashboard").slice(1);
+  currentHash = PAGES[h] ? h : "dashboard";
+  buildNav();
+  navCounts();
+
+  const bannerPages = ["browser", "chats", "cloud", "contacts", "calendars", "calls",
+                       "location", "media", "messages", "files", "forensics"];
+  const html = await PAGES[currentHash]();
+  const pageContainer = document.getElementById("page");
+  if (pageContainer) {
+    pageContainer.innerHTML = (bannerPages.includes(currentHash) ? detectionBanner() : "") + (html || "");
+  }
+  document.querySelectorAll("[data-nav]").forEach(el => el.onclick = () => location.hash = el.dataset.nav);
+  renderCasePanel();
+}
+window.addEventListener("hashchange", render);
+
+/* ---------------- non-disruptive background polling ---------------- */
+async function backgroundPoll() {
+  try {
+    const dev = await api("/api/device");
+    const isAttached = dev && !dev.error && dev.udid;
+    const currentUdid = isAttached ? dev.udid : null;
+    const currentState = isAttached ? dev.state : null;
+
+    // Detect device state transitions
+    if (currentUdid !== LAST_DEVICE_UDID || currentState !== LAST_DEVICE_STATE) {
+      if (currentUdid && !LAST_DEVICE_UDID) {
+        notify("Device Attached", `${dev.model} (${dev.chip || "Apple silicon"}) connected in ${dev.state} mode.`, "success", "DEVICE");
+      } else if (!currentUdid && LAST_DEVICE_UDID) {
+        notify("Device Detached", "iOS target device disconnected.", "warning", "DEVICE");
+      } else if (currentUdid && currentState !== LAST_DEVICE_STATE) {
+        notify(`Device Mode Changed (${currentState})`, `${dev.model} transitioned to ${currentState}.`, "info", "DEVICE");
+      }
+      LAST_DEVICE_UDID = currentUdid;
+      LAST_DEVICE_STATE = currentState;
+      DEVICE = isAttached ? dev : null;
+
+      // Update UI headers & status without destroying entire page
+      const tag = document.getElementById("rail-status-tag");
+      const text = document.getElementById("rail-status-text");
+      if (tag && text) {
+        if (DEVICE) {
+          tag.className = `text-tag ${DEVICE.state === "AFU" ? "success" : "warning"}`;
+          tag.textContent = DEVICE.state;
+          text.textContent = `${DEVICE.model} (${DEVICE.chip})`;
+        } else {
+          tag.className = "text-tag success";
+          tag.textContent = "ONLINE";
+          text.textContent = "System Ready";
+        }
+      }
+      renderCasePanel();
+
+      // Only refresh page if currently viewing devices or dashboard
+      if (currentHash === "devices" || currentHash === "dashboard") {
+        render();
+      }
+    }
+
+    // Check notifications feed from server
+    const notifRes = await api("/api/notifications");
+    if (notifRes && Array.isArray(notifRes.notifications)) {
+      if (notifRes.notifications.length > NOTIFICATIONS_LIST.length) {
+        const newEntries = notifRes.notifications.slice(NOTIFICATIONS_LIST.length);
+        newEntries.forEach(n => {
+          NOTIFICATIONS_LIST.unshift(n);
+          UNREAD_NOTIFS++;
+          showToast(n);
+        });
+        updateNotifBadge();
+        renderNotifDrawer();
+      }
+    }
+  } catch {
+    // network poll error - quiet
+  }
+}
+
+async function refreshCurrentPage() {
+  const [dev, apps, cases, logr] = await Promise.all([
+    api("/api/device"), api("/api/apps"), api("/api/cases"), api("/api/log")
+  ]);
+  DEVICE = dev && !dev.error && dev.udid ? dev : null;
+  APPS = apps || [];
+  CASES = cases || [];
+  if (!ACTIVE_CASE && CASES.length) ACTIVE_CASE = CASES[0];
+  if (ACTIVE_CASE) ARTIFACTS = await api("/api/artifacts?case=" + encodeURIComponent(ACTIVE_CASE.case_id));
+  ARTIFACTS._log = logr.lines || [];
+
+  document.getElementById("evidence-count").textContent =
+    ((ARTIFACTS.messages?.length || 0) + (ARTIFACTS.contacts?.length || 0) + (ARTIFACTS.calls?.length || 0)) + " items";
+
+  await render();
+}
+
+/* ---------------- bootstrap initialization ---------------- */
+document.addEventListener("DOMContentLoaded", async () => {
+  // Setup notes autosave
+  const notesEl = document.getElementById("case-notes");
+  if (notesEl) {
+    notesEl.addEventListener("input", e => {
+      if (!ACTIVE_CASE) return;
+      clearTimeout(notesTimer);
+      notesTimer = setTimeout(() => {
+        api("/api/case", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ case_id: ACTIVE_CASE.case_id, destination: ACTIVE_CASE.destination, notes: e.target.value }),
+        });
+      }, 800);
+    });
+  }
+
+  // Initial load
+  await refreshCurrentPage();
+
+  // Load examiner name in header
+  if (CACHE.settings?.examiner) {
+    const exBadge = document.getElementById("topbar-examiner");
+    if (exBadge) exBadge.textContent = CACHE.settings.examiner;
+  }
+
+  // Smooth, non-disruptive background polling every 4 seconds
+  setInterval(backgroundPoll, 4000);
+});
