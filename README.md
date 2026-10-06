@@ -2,7 +2,7 @@
 
 **An open-source iOS forensic triage + exploit-research workstation — the honest Cellebrite-class alternative.**
 
-- **84 verified public exploit routes** (A4 → A20 Pro, iOS 6 → 27.0) + **36 acquisition-relevant Apple-advisory CVEs** (iOS 26.x/27.x)
+- **91 verified public exploit routes** (A4 → A20 Pro, iOS 6 → 27.0) + **36 acquisition-relevant Apple-advisory CVEs** (iOS 26.x/27.x)
 - **Capability TRUTH system**: research status ≠ operational capability — a strict status machine (UNKNOWN → DOCUMENTED → PUBLIC_POC → LAB_REPRODUCED → LAB_VALIDATED → INTEGRATED → REGRESSION_TESTED) with a consistency auditor; only REGRESSION_TESTED capabilities are planner-selectable
 - **Event-sourced case journal**: append-only sessions, permanent EVD-000001+ evidence IDs, custody events, first-class failure records, full case replay
 - **Own BFU stack**: keybag parser, UID-key unwrap, cprotect parsing, AES-CBC sector decryption
