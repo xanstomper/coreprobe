@@ -7,6 +7,7 @@
 - **Event-sourced case journal**: append-only sessions, permanent EVD-000001+ evidence IDs, custody events, first-class failure records, full case replay
 - **Own BFU stack**: keybag parser, UID-key unwrap, cprotect parsing, AES-CBC sector decryption
 - **Zero-day research program**: DFU USB capture → trace analysis → mutation fuzzing → campaign triage
+- **PAC-diversifier scanner** (`opensleuth pacscan`): automates the CVE-2026-65330 discovery technique — find fixed-diversifier pointer-signing in any kernelcache = own-exploit research leads
 - **Court-ready chain of custody**: native-hash manifest + HMAC-SHA256 integrity seal + tamper detection
 - **Desktop app + web studio + CLI** — every capability wired into all three
 - 323 tests green · MIT license

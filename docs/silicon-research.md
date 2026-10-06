@@ -86,3 +86,8 @@ does not manufacture a bypass - it is the instrument that finds one.
 
 Until then: usbliter8 (A12/A13) + ramdisk flows, escrow, and AFU routes are
 the honest maximum on modern silicon, and CoreProbe ships all of them.
+
+
+## pacscan (added 2026-10-06)
+
+`opensleuth pacscan <kernelcache>` — scans arm64e kernelcache for fixed PAC diversifiers (CVE-2026-65330 class). Zero-diversifier sites = HIGH. Output = research leads ranked by forgeability; reachability proof is on-device per truth ladder.

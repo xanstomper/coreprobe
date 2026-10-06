@@ -1015,6 +1015,20 @@ def cmd_exploits(args):
     ))
 
 
+def cmd_pacscan(args):
+    """Scan a kernelcache for fixed PAC diversifiers (own-exploit lead #1).
+
+    Automates the CVE-2026-65330 discovery technique: fixed diversifier in a
+    pointer-signing path = forgeable function pointer with any kernel-write.
+    Output is a research-lead ranking, not an exploit.
+    """
+    from .pacscan import scan_pac_diversifiers, render_scan
+
+    data = Path(args.kernelcache).read_bytes()
+    result = scan_pac_diversifiers(data)
+    print(render_scan(result))
+
+
 def cmd_research(args):
     """Run the public iOS research pipeline: fetch Apple security releases,
     flag new CVEs relevant to acquisition, keep incremental state.
@@ -2400,6 +2414,9 @@ def main(argv=None):
     rsch.add_argument("--timeout", type=int, default=30, help="fetch timeout seconds")
     rsch.add_argument("--state", default=None, help="state file path (default ~/.coreprobe/research-state.json)")
     rsch.set_defaults(fn=cmd_research)
+    pac = sub.add_parser("pacscan", help="kernelcache PAC-diversifier scanner - own-exploit research lead generator (CVE-2026-65330 technique)")
+    pac.add_argument("kernelcache", help="path to decompressed arm64e kernelcache (Mach-O or raw)")
+    pac.set_defaults(fn=cmd_pacscan)
     expo = sub.add_parser("exposure", help="public routes + CVE disclosures for a chip/iOS (auto-detect connected device)")
     expo.add_argument("--chip", default="", help="chip (A7..A18); auto-detected if omitted")
     expo.add_argument("--ios", default="", help="iOS version (e.g. 26.6.1); auto-detected if omitted")
