@@ -91,3 +91,8 @@ the honest maximum on modern silicon, and CoreProbe ships all of them.
 ## pacscan (added 2026-10-06)
 
 `opensleuth pacscan <kernelcache>` — scans arm64e kernelcache for fixed PAC diversifiers (CVE-2026-65330 class). Zero-diversifier sites = HIGH. Output = research leads ranked by forgeability; reachability proof is on-device per truth ladder.
+
+
+## kdiff (added 2026-10-06)
+
+`opensleuth kdiff <patched> <unpatched>` — index-aligned rolling-block hash diff between two kernelcaches surfaces the regions a fix touched (n-day hunting). Symbol-adjacent regions rank HIGH. Output = research leads, truth-ladder gated.

@@ -1015,6 +1015,20 @@ def cmd_exploits(args):
     ))
 
 
+def cmd_kdiff(args):
+    """Diff patched vs unpatched kernelcache -> candidate n-day regions.
+
+    Index-aligned rolling-block hashing surfaces the surgical regions a fix
+    touched. Symbols near a region raise it to HIGH (likely the exploited
+    code path). Output is an n-day RESEARCH LEAD, not a weaponized exploit.
+    """
+    from .kdiff import diff_kernelcaches, render_diff
+
+    patched = Path(args.patched).read_bytes()
+    unpatched = Path(args.unpatched).read_bytes()
+    print(render_diff(diff_kernelcaches(patched, unpatched)))
+
+
 def cmd_pacscan(args):
     """Scan a kernelcache for fixed PAC diversifiers (own-exploit lead #1).
 
@@ -2417,6 +2431,10 @@ def main(argv=None):
     pac = sub.add_parser("pacscan", help="kernelcache PAC-diversifier scanner - own-exploit research lead generator (CVE-2026-65330 technique)")
     pac.add_argument("kernelcache", help="path to decompressed arm64e kernelcache (Mach-O or raw)")
     pac.set_defaults(fn=cmd_pacscan)
+    kd = sub.add_parser("kdiff", help="kernelcache patch-diff - n-day hunting (patched vs unpatched -> candidate regions)")
+    kd.add_argument("patched", help="path to patched (fixed) kernelcache")
+    kd.add_argument("unpatched", help="path to unpatched (vulnerable) kernelcache")
+    kd.set_defaults(fn=cmd_kdiff)
     expo = sub.add_parser("exposure", help="public routes + CVE disclosures for a chip/iOS (auto-detect connected device)")
     expo.add_argument("--chip", default="", help="chip (A7..A18); auto-detected if omitted")
     expo.add_argument("--ios", default="", help="iOS version (e.g. 26.6.1); auto-detected if omitted")

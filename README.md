@@ -8,6 +8,7 @@
 - **Own BFU stack**: keybag parser, UID-key unwrap, cprotect parsing, AES-CBC sector decryption
 - **Zero-day research program**: DFU USB capture → trace analysis → mutation fuzzing → campaign triage
 - **PAC-diversifier scanner** (`opensleuth pacscan`): automates the CVE-2026-65330 discovery technique — find fixed-diversifier pointer-signing in any kernelcache = own-exploit research leads
+- **Kernelcache patch-diff** (`opensleuth kdiff`): patched vs unpatched kernel — surgical n-day hunting; symbol-adjacent regions ranked HIGH
 - **Court-ready chain of custody**: native-hash manifest + HMAC-SHA256 integrity seal + tamper detection
 - **Desktop app + web studio + CLI** — every capability wired into all three
 - 323 tests green · MIT license
