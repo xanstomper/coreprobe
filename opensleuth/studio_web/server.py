@@ -1011,6 +1011,10 @@ class Handler(BaseHTTPRequestHandler):
                     mnt = tempfile.mkdtemp(prefix="sleuth-web-mnt-")
                     try:
                         r = _run(["ifuse", mnt], timeout=60)
+                    except FileNotFoundError:
+                        log("step=media ifuse not installed - skipping")
+                        shutil.rmtree(mnt, ignore_errors=True)
+                        continue
                         if r.returncode == 0:
                             for d in ("DCIM", "Downloads", "Recordings"):
                                 src = Path(mnt) / d
