@@ -4,6 +4,9 @@ import struct
 import unittest
 
 from opensleuth import pacscan
+from opensleuth.pacscan import _HAS_CAPSTONE
+
+need_capstone = unittest.skipUnless(_HAS_CAPSTONE, "capstone not installed")
 
 
 def movz_w(rd: int, imm16: int) -> int:
@@ -47,11 +50,13 @@ class PacscanTest(unittest.TestCase):
         # module import must never fail even when capstone is absent
         self.assertIsNotNone(pacscan)
 
+    @need_capstone
     def test_finds_fixed_diversifier_65330_pattern(self):
         r = pacscan.scan_pac_diversifiers(synth_fixture())
         divs = {f["diversifier"] for f in r["findings"]}
         self.assertIn(0x307A, divs)
 
+    @need_capstone
     def test_finds_zero_diversifier_high(self):
         r = pacscan.scan_pac_diversifiers(synth_fixture())
         zero = next((f for f in r["findings"] if f["diversifier"] == 0), None)
@@ -64,18 +69,22 @@ class PacscanTest(unittest.TestCase):
         r = pacscan.scan_pac_diversifiers(code)
         self.assertEqual(r["findings"], [])
 
+    @need_capstone
     def test_nearby_string_hint(self):
         r = pacscan.scan_pac_diversifiers(synth_fixture())
         self.assertTrue(all(f["nearby_hint"] == "tmpfs" for f in r["findings"]))
 
+    @need_capstone
     def test_render_contains_honesty_banner(self):
         out = pacscan.render_scan(pacscan.scan_pac_diversifiers(synth_fixture()))
         self.assertIn("static lead only", out)
 
+    @need_capstone
     def test_render_empty_when_hardened(self):
         out = pacscan.render_scan(pacscan.scan_pac_diversifiers(pack(*([NOP] * 64))))
         self.assertIn("no fixed diversifiers found", out)
 
+    @need_capstone
     def test_summary_counts(self):
         r = pacscan.scan_pac_diversifiers(synth_fixture())
         self.assertEqual(r["summary"]["pac_events"], 2)
