@@ -4,14 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opensleuth"
-version = "0.1.0"
+version = "0.2.0"
 description = "CoreProbe / opensleuth - open-source iOS forensic triage workstation"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
+dependencies = [
+    "pymobiledevice3",
+    "pyusb",
+    "lz4",
+    "pycryptodome",
+]
 
 [project.optional-dependencies]
 desktop = ["PyQt6", "PyQt6-WebEngine"]
+exploit = ["capstone"]
+icloud = ["pyicloud"]
 
 [project.scripts]
 opensleuth = "opensleuth.cli:main"
