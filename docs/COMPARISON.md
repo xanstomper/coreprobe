@@ -26,8 +26,8 @@ Legend: ● full ◐ partial ⚗ research ○ none — n/a
 
 ## Where CoreProbe is better
 
-- **Openness/auditability**: every claim in this repo is testable; 566 tests, CI-gated on every push. Cellebrite/AXIOM are closed boxes a court must trust.
-- **Exploit catalog**: 92 public routes + 36 CVEs, ranked by acquisition value — the vendors keep theirs hidden or price it per-case.
+- **Openness/auditability**: every claim in this repo is testable; 638 tests, CI-gated on every push. Cellebrite/AXIOM are closed boxes a court must trust.
+- **Exploit catalog**: 93 public routes + 36 CVEs, ranked by acquisition value — the vendors keep theirs hidden or price it per-case.
 - **Cost**: $0 vs $$$$ licenses / per-device fees.
 - **Research instrumentation**: DFU capture + trace analysis + mutation fuzzing + campaign triage — a real zero-day research program in a box. No commercial vendor ships this.
 - **Silicon envelope**: published per-chip truth (checkm8, Blackbird, usbliter8 incl. provenance) with honest 'nothing public for A14+'.

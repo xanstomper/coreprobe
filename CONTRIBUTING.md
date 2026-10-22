@@ -16,7 +16,7 @@ Thank you for helping close the gap with commercial forensic tooling.
 git clone https://github.com/xanstomper/coreprobe && cd coreprobe
 pip install -e .
 cmake -B build -S . && cmake --build build          # native core
-python -m pytest tests/ -q                          # 566 tests
+python -m pytest tests/ -q                          # 638 tests
 ```
 
 ## What to work on

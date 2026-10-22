@@ -604,6 +604,58 @@ SEED_CAPABILITIES: list[dict[str, Any]] = [
         "validation_evidence": [],
         "test_fixture": "tests/test_exploitrunner.py::TestExecutorGating::test_restore_traversal_version_gate",
     },
+    {
+        "capability_id": "bfu-ramdisk-extract",
+        "name": "BFU ramdisk extraction (keybags + metadata, post-PWND)",
+        "status": "DOCUMENTED",
+        "category": "acquisition",
+        "research_id": "bfu-ramdisk-extract",
+        "description": "Post-PWND BFU extraction: with a checkm8 (A7-A11) "
+                       "or usbliter8 (A12/A13) PWND marker present, loads the "
+                       "examiner-provided per-device ramdisk payload set "
+                       "(iBSS/iBEC/ramdisk/devicetree/trustcache) over "
+                       "irecovery and pulls system/user keybags + fs "
+                       "metadata over SSH (opensleuth.bfu.run_ramdisk_extract). "
+                       "SEP-gated Complete* classes stay encrypted until "
+                       "first unlock.",
+        "adapter": "opensleuth.exploitrunner.exec_bfu_ramdisk_extract",
+        "adapter_version": "",
+        "prerequisites": ["PWND marker in target state (checkm8 PWND on A7-A11, or PWND:[usbliter8] on A12/A13)",
+                          "examiner-provided ramdisk payload dir with the full payload set (iBSS, iBEC, ramdisk, devicetree, trustcache)",
+                          "irecovery + sshpass installed"],
+        "supported_builds": [],
+        "limitations": [
+            "executor exists and is unit-gated (marker gate + missing-payload gate exercised directly in tests), but there is no recorded hardware validation run - held at DOCUMENTED until a real-device extraction is recorded",
+            "payloads are examiner-provided per-device files; CoreProbe never fabricates them, and the executor fails naming exactly which payload files are missing",
+            "protected-class (Complete*) content stays SEP-encrypted at BFU; this route yields keybags/metadata/unprotected classes only",
+        ],
+        "validation_evidence": [],
+        "test_fixture": "tests/test_bfu_wiring.py::TestBfuExecutors::test_extract_missing_payloads_lists_exact_files",
+    },
+    {
+        "capability_id": "bfu-intel",
+        "name": "BFU yield assessment (expectations + SEP wall, read-only)",
+        "status": "INTEGRATED",
+        "category": "acquisition",
+        "research_id": "bfu-yield-card",
+        "description": "Read-only BFU intelligence step: renders the "
+                       "per-chip yield card + protection-class expectations "
+                       "(opensleuth.bfu.yield_card/expectations) for the "
+                       "probed target - what this device can yield before "
+                       "first unlock, and the SEP wall stated per device. "
+                       "No device writes, no subprocess tooling; honest "
+                       "failure only when the chip is unknown.",
+        "adapter": "opensleuth.exploitrunner.exec_bfu_intel",
+        "adapter_version": "1",
+        "prerequisites": ["chip identified by probe (lockdown/serial/iBoot)"],
+        "supported_builds": [],
+        "limitations": [
+            "no recorded hardware validation run yet (validation required)",
+            "assessment only: renders expectations/yield from the probed chip/iOS - it acquires nothing by itself",
+        ],
+        "validation_evidence": [],
+        "test_fixture": "tests/test_bfu_wiring.py::TestBfuExecutors::test_bfu_intel_a13_renders_yield_card",
+    },
 ]
 
 REGISTRY_PATH = Path(__file__).parent / "capabilities.json"
