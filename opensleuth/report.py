@@ -19,6 +19,7 @@ _CSV_COLUMNS = {
     "bookmarks": ["title", "url", "folder", "modified"],
     "keychain": ["kind", "service", "account", "group", "data_size", "data_hex", "plaintext_attempt", "created", "modified"],
     "voicemail": ["date", "sender", "callback_token", "duration_seconds", "expiration", "trashed", "flags", "audio_present", "audio_size"],
+    "notifications": ["date", "bundle_id", "sender", "thread_id", "title", "body"],
     "notes": ["title", "created", "modified", "body_size", "body_saved", "body_hex"],
     "app_databases": ["domain", "path", "size"],
 }
@@ -90,6 +91,9 @@ def _timeline(artifacts):
     for c in artifacts.get("calls", []):
         if c.get("date"):
             events.append((c["date"], "Call", _esc(f"{c['type']} {c['direction']} {c.get('phone') or ''} ({c.get('duration_seconds') or 0}s)")))
+    for n in artifacts.get("notifications", []):
+        if n.get("date"):
+            events.append((n["date"], "Notification", _esc(f"{n.get('bundle_id') or '?'} from {n.get('sender') or '?'}: {(n.get('title') or n.get('body') or '')[:120]}")))
     for h in artifacts.get("history", []):
         if h.get("date"):
             events.append((h["date"], "Web", _esc(f"{h.get('title') or ''} - {h['url']}")))
@@ -110,7 +114,7 @@ def build_report(artifacts, outdir: Path, html_path=None):
     # CSVs
     timeline = _timeline(artifacts)
     for name in ("messages", "whatsapp", "telegram", "locations", "contacts", "calls", "history", "bookmarks",
-                 "keychain", "voicemail", "notes", "app_databases"):
+                 "keychain", "voicemail", "notifications", "notes", "app_databases"):
         cols = _CSV_COLUMNS[name]
         rows = artifacts.get(name, [])
         if not rows and name in ("whatsapp", "telegram", "locations"):
@@ -286,6 +290,24 @@ def build_report(artifacts, outdir: Path, html_path=None):
         + "</section>"
     )
     sec.append(
+        "<section id=notifications><h2>Notifications <span class=count>"
+        + str(len(artifacts.get("notifications", [])))
+        + "</span></h2>"
+        + _table(
+            ["Date", "App (bundle)", "Sender", "Thread", "Title", "Body"],
+            artifacts.get("notifications", []),
+            lambda r: [
+                _esc(r.get("date")),
+                _esc(r.get("bundle_id")),
+                _esc(r.get("sender")),
+                _esc(r.get("thread_id")),
+                _esc(r.get("title")),
+                _esc((r.get("body") or "")[:200]),
+            ],
+        )
+        + "</section>"
+    )
+    sec.append(
         "<section id=notes><h2>Notes <span class=count>"
         + str(len(artifacts.get("notes", [])))
         + "</span></h2>"
@@ -384,7 +406,7 @@ def build_report(artifacts, outdir: Path, html_path=None):
     if artifacts.get("locations"):
         all_nav.append("locations")
     all_nav.extend(["contacts", "calls", "history", "bookmarks",
-                    "keychain", "voicemail", "notes", "prefs", "databases", "files", "timeline"])
+                    "keychain", "voicemail", "notifications", "notes", "prefs", "databases", "files", "timeline"])
 
     nav_links = "".join(
         f'<a href="#{name}">{name.title().replace("_", " ")}</a>'

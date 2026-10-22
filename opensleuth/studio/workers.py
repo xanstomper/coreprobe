@@ -258,7 +258,7 @@ class DumpWorker(QThread):
                 try:
                     data = json.loads((out / "artifacts.json").read_text())
                     for k in ("messages", "contacts", "calls", "history", "bookmarks",
-                              "keychain", "voicemail", "notes", "app_databases"):
+                              "keychain", "voicemail", "notifications", "notes", "app_databases"):
                         counts[k] = len(data.get(k, []))
                 except Exception:
                     pass

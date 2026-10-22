@@ -151,6 +151,28 @@ def build_voicemail(path):
     )
 
 
+def build_notifications(path):
+    # SYNTHETIC-but-plausible schema for DuetExpertCenter's
+    # notificationAndSuggestionDB.db: the real on-disk schema is
+    # undocumented and varies by iOS version, so the parser introspects
+    # tables/columns at runtime; this fixture uses camelCase column names
+    # in the style Apple ships. Row 3 is from com.example.deletedapp,
+    # an app with no AppDomain in this backup (deleted) -- the parser
+    # must still return it (deleted-app corroboration). Its timestamp is
+    # stored in nanoseconds to exercise magnitude normalisation.
+    _new_db(
+        path,
+        [
+            ("notifications", ["id INTEGER PRIMARY KEY", "bundleId TEXT", "timestamp REAL", "threadId TEXT", "senderId TEXT", "title TEXT", "body TEXT"],
+             [
+                 {"id": 1, "bundleId": "net.whatsapp.WhatsApp", "timestamp": APPLE_NOW - 3600, "threadId": "15551234567@s.whatsapp.net", "senderId": "+15551234567", "title": "Sarah Chen", "body": "running late, 10 mins"},
+                 {"id": 2, "bundleId": "org.whispersystems.signal", "timestamp": APPLE_NOW - 1800, "threadId": "signal-thread-42", "senderId": "+15559876543", "title": "Mike Torres", "body": "call when you land"},
+                 {"id": 3, "bundleId": "com.example.deletedapp", "timestamp": (APPLE_NOW - 900) * 1e9, "threadId": "deleted-thread-7", "senderId": "+15550001111", "title": "Ghost", "body": "this app was uninstalled"},
+             ]),
+        ],
+    )
+
+
 def build_notes(path):
     _new_db(
         path,
@@ -185,6 +207,7 @@ def main(outdir: str):
         ("HomeDomain", "Library/Safari/History.db"): build_safari_history,
         ("HomeDomain", "Library/Safari/Bookmarks.db"): build_safari_bookmarks,
         ("HomeDomain", "Library/Voicemail/voicemail.db"): build_voicemail,
+        ("HomeDomain", "Library/DuetExpertCenter/notificationAndSuggestionDB.db"): build_notifications,
         ("SysContainerDomain-systemgroup.com.apple.keychain", "Library/Keychains/keychain-2.db"): build_keychain,
         ("HomeDomain", "Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"): build_notes,
         ("AppDomain-com.example.agent", "Documents/config.json"): None,

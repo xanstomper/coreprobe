@@ -15,7 +15,8 @@ from pathlib import Path
 from . import __version__
 from .backup import Backup, BackupError
 from .artifacts import (sms, contacts, calls, safari, plists, keychain,
-                       voicemail, notes, whatsapp, telegram, signal, locations)
+                       voicemail, notes, whatsapp, telegram, signal, locations,
+                       notifications)
 from .matrix import chip_for, recommend, render, KNOWN_DEVICES, PROFILES
 from .report import build_report
 
@@ -1483,6 +1484,7 @@ def cmd_dump(args):
         "messages": [],
         "whatsapp": [],
         "telegram": [],
+        "notifications": [],
         "locations": [],
         "contacts": [],
         "calls": [],
@@ -1549,6 +1551,14 @@ def cmd_dump(args):
     vm = run(voicemail.parse, "HomeDomain", "Library/Voicemail/voicemail.db", "voicemail.db")
     if vm:
         artifacts["voicemail"] = vm
+
+    # Notification metadata (DuetExpertCenter): survives source-app
+    # deletion, so rows corroborate apps/comms no longer on the device.
+    notif = run(notifications.parse, "HomeDomain",
+                "Library/DuetExpertCenter/notificationAndSuggestionDB.db",
+                "notificationAndSuggestionDB.db")
+    if notif:
+        artifacts["notifications"] = notif
 
     try:
         artifacts["notes"] = notes.parse(backup, blob_dir=Path(args.out) / "notes_blobs")

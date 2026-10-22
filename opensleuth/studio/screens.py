@@ -618,7 +618,7 @@ class ResultsScreen(QWidget):
         names = [
             ("messages", "Messages"), ("contacts", "Contacts"), ("calls", "Calls"),
             ("history", "Web history"), ("bookmarks", "Bookmarks"),
-            ("keychain", "Keychain"), ("voicemail", "Voicemail"), ("notes", "Notes"),
+            ("keychain", "Keychain"), ("voicemail", "Voicemail"), ("notifications", "Notifications"), ("notes", "Notes"),
             ("app_databases", "App DBs"),
         ]
         for i, (k, label) in enumerate(names):

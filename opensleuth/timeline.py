@@ -105,6 +105,7 @@ def from_backup_artifacts(artifacts: dict[str, Any]) -> list[dict[str, Any]]:
         "history": "safari", "safari": "safari",
         "bookmarks": "safari",
         "voicemail": "voicemail",
+        "notifications": "notifications",
     }
     sources = {}
     for key, rows in (artifacts or {}).items():

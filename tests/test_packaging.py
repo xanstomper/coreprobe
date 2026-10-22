@@ -16,7 +16,7 @@ def test_pyproject_declares_scripts():
     assert 'opensleuth = "opensleuth.cli:main"' in text
     assert 'opensleuth-web = "opensleuth.studio_web.server:main"' in text
     assert 'opensleuth-desktop = "opensleuth.studio_desktop:main"' in text
-    assert 'requires-python = ">=3.9"' in text
+    assert 'requires-python = ">=3.10"' in text
 
 
 def test_pyproject_packages_static_assets():
