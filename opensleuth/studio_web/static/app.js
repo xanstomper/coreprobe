@@ -56,7 +56,7 @@ const SECTION_META = {
   files: ["Files", "Documents and file system"],
   forensics: ["Forensics", "Timeline, SQLite & multi-hash analysis"],
   reports: ["Reports", "CASE/UCO & evidentiary certification"],
-  exploits: ["Exploits", "Public iOS exploit catalog (91 routes)"],
+  exploits: ["Exploits", "Public iOS exploit catalog (92 routes)"],
   tools: ["Tools", "Open-source forensic toolchain + install status"],
   research: ["Research", "Zero-day research: campaigns, traces, leads"],
   bfu: ["BFU Lab", "Modern-phone BFU: FS intelligence, keybags, decrypt"],
@@ -451,7 +451,7 @@ function pageDashboard() {
     <div class="page-title">Dashboard</div>
     <div class="page-sub">Overview of your forensic analysis progress, hardware state, and evidence sources.</div>
     <div class="metric-row">
-      ${[["Total Devices", totalDevices, "devices", "devices"],["Artifacts Found", artifactCount.toLocaleString(), "forensics", "forensics"],["Exploit Routes", "91 Cataloged", "exploits", "exploits"],["Cases", CASES.length || 1, "reports", "reports"]]
+      ${[["Total Devices", totalDevices, "devices", "devices"],["Artifacts Found", artifactCount.toLocaleString(), "forensics", "forensics"],["Exploit Routes", "92 Cataloged", "exploits", "exploits"],["Cases", CASES.length || 1, "reports", "reports"]]
         .map(([l, v, ic, nav]) => `<div class="metric-card">${ICONS[ic]}<div class="metric-body"><div class="metric-label">${l}</div><div class="metric-value">${v}</div><div class="metric-link" data-nav="${nav}">View ${l.replace("Total ","").replace(" Found","")} →</div></div></div>`).join("")}
     </div>
     <div class="two-col">

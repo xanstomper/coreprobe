@@ -77,6 +77,6 @@ Generalist mobile suites.
 
 ## What it can actually do RIGHT NOW
 
-Everything marked ●/◐ above is shipped, tested (323 green), and
+Everything marked ●/◐ above is shipped, tested (566-test suite, CI-gated), and
 documented in this repo. The two ○ rows are the walls; the research
 campaign in this repo is the only open path to moving them.

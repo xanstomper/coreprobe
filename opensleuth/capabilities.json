@@ -169,6 +169,209 @@
       "last_successful_validation": "",
       "last_failed_validation": "",
       "test_fixture": ""
+    },
+    {
+      "capability_id": "palera1n-jailbreak",
+      "name": "palera1n jailbreak boot (A8-A11, checkm8)",
+      "status": "INTEGRATED",
+      "category": "bootrom",
+      "research_id": "palera1n",
+      "description": "Real palera1n run: enters recovery from a booted state when needed, then boots the rootless jailbreak. Success is claimed only when an objective state change is observed (AFC2 mountable or PongoOS reachable).",
+      "adapter": "opensleuth.exploitrunner.exec_palera1n_jailbreak",
+      "adapter_version": "1",
+      "prerequisites": [
+        "A8-A11 (checkm8 silicon)",
+        "iOS 15+",
+        "palera1n binary installed",
+        "DFU/recovery mode, or booted + paired for recovery entry"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "no recorded hardware validation run yet (validation required)",
+        "A11 on iOS 16+ requires the passcode to be disabled (upstream palera1n constraint)"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_exploitrunner.py::TestExecutorGating::test_palera1n_jailbreak_requires_tool"
+    },
+    {
+      "capability_id": "checkra1n",
+      "name": "checkra1n jailbreak (A7-A11, legacy)",
+      "status": "INTEGRATED",
+      "category": "bootrom",
+      "research_id": "checkra1n",
+      "description": "checkra1n CLI run (checkm8) from DFU/recovery. Success is claimed only on AFC2 mountable or a PWND marker in the USB serial.",
+      "adapter": "opensleuth.exploitrunner.exec_checkra1n",
+      "adapter_version": "1",
+      "prerequisites": [
+        "A7-A11",
+        "checkra1n CLI installed (Linux/macOS)",
+        "device in DFU or recovery mode"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "no recorded hardware validation run yet (validation required)",
+        "legacy tool: upstream checkra1n targets the iOS 12-14.x era; not maintained for modern iOS"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_exploitrunner.py::TestExecutorGating::test_checkra1n_requires_mode"
+    },
+    {
+      "capability_id": "trollstore-install",
+      "name": "TrollStore install / verify (CoreTrust, AFU)",
+      "status": "INTEGRATED",
+      "category": "acquisition",
+      "research_id": "trollstore",
+      "description": "Installs an examiner-provided TrollStore .tipa via pymobiledevice3 developer services, or verifies an existing TrollStore install via the app list. Permanent signing happens on-device via the CoreTrust bug.",
+      "adapter": "opensleuth.exploitrunner.exec_trollstore_install",
+      "adapter_version": "1",
+      "prerequisites": [
+        "AFU (unlocked, paired)",
+        "pymobiledevice3 installed",
+        "CoreTrust-vulnerable iOS (TrollStore support window)",
+        "examiner-provided .tipa/.ipa payload, or TrollStore already installed"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "no recorded hardware validation run yet (validation required)",
+        "host installs/verifies only; not an extraction route itself"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_exploitrunner.py::TestExecutorGating::test_trollstore_requires_afu"
+    },
+    {
+      "capability_id": "afu-agent",
+      "name": "AFU agent install + AFC2 verify (app-based jailbreaks)",
+      "status": "DOCUMENTED",
+      "category": "kernel",
+      "research_id": "dopamine-family",
+      "description": "Generic AFU agent flow: installs an examiner-provided jailbreak/agent .ipa/.tipa via developer services, then verifies AFC2 root. Never claims the jailbreak itself ran on-device.",
+      "adapter": "opensleuth.exploitrunner.exec_afu_agent",
+      "adapter_version": "",
+      "prerequisites": [
+        "AFU (unlocked, paired)",
+        "examiner-provided agent .ipa/.tipa in a payload directory",
+        "pymobiledevice3 installed"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "executor exists but no test fixture exercises exec_afu_agent directly (only planner strategy presence is asserted) - held at DOCUMENTED until a fixture lands",
+        "success requires AFC2 live after the examiner opens the agent app on-device once"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": ""
+    },
+    {
+      "capability_id": "pongo-ramdisk",
+      "name": "PongoOS ramdisk boot (checkm8, DFU/recovery)",
+      "status": "DOCUMENTED",
+      "category": "bootrom",
+      "research_id": "pongoos",
+      "description": "Boots the PongoOS shell via palera1n -p as the ramdisk-chain stepping stone. Success is claimed only when irecovery answers (PongoOS reachable).",
+      "adapter": "opensleuth.exploitrunner.exec_pongo_ramdisk",
+      "adapter_version": "",
+      "prerequisites": [
+        "checkm8 chip (A8-A11) in DFU/recovery or PWND state",
+        "palera1n binary installed",
+        "payloads (iBSS/iBEC or ramdisk image) available"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "executor exists but no test fixture exercises exec_pongo_ramdisk directly (only planner strategy presence is asserted) - held at DOCUMENTED until a fixture lands",
+        "no recorded hardware validation run yet"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": ""
+    },
+    {
+      "capability_id": "usbliter8-chain",
+      "name": "usbliter8 chain boot (A12/A13, after RP2350 PWND)",
+      "status": "INTEGRATED",
+      "category": "bootrom",
+      "research_id": "usbliter8",
+      "description": "Post-PWND chain: with the PWND:[usbliter8] marker present, runs usbliter8ctl demote + boot. Success is claimed only when PongoOS or recovery/iBoot is reachable afterwards.",
+      "adapter": "opensleuth.exploitrunner.exec_usbliter8_chain",
+      "adapter_version": "1",
+      "prerequisites": [
+        "A12/A13",
+        "PWND:[usbliter8] marker present (RP2350 rig already ran the bootrom exploit)",
+        "usbliter8ctl installed"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "no recorded hardware validation run yet (validation required)",
+        "CoreProbe does not run the bootrom exploit itself - the RP2350 rig does; this adapter only continues the chain after PWND"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_exploitrunner.py::TestExecutorGating::test_usbliter8_chain_requires_marker"
+    },
+    {
+      "capability_id": "misaka-mg",
+      "name": "Misaka/Nugget MobileGestalt tool install (iOS 26.0-26.1)",
+      "status": "INTEGRATED",
+      "category": "kernel",
+      "research_id": "misaka26",
+      "description": "Host-side eligibility check + install of the Misaka/Nugget MobileGestalt tool (.tipa) via developer services, or verification that it is already installed. The exploit itself runs on-device when the examiner opens the app.",
+      "adapter": "opensleuth.exploitrunner.exec_misaka_mg",
+      "adapter_version": "1",
+      "prerequisites": [
+        "AFU (unlocked, paired)",
+        "iOS 26.0-26.1 (patched in 26.2)",
+        "pymobiledevice3 installed",
+        "examiner-provided .tipa payload, or tool already installed"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "no recorded hardware validation run yet (validation required)",
+        "userspace MobileGestalt tweaks only - not a filesystem acquisition route"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_exploitrunner.py::TestExecutorGating::test_misaka_version_gate"
+    },
+    {
+      "capability_id": "restore-traversal-probe",
+      "name": "Restore-traversal research probe (CVE-2026-84598)",
+      "status": "INTEGRATED",
+      "category": "research",
+      "research_id": "cve-2026-84598",
+      "description": "Crafted restore-manifest probe: observes whether a <26.7 target's restore stack accepts traversal paths. Research-safe by design - the harness aborts before any file transfer.",
+      "adapter": "opensleuth.exploitrunner.exec_restore_traversal",
+      "adapter_version": "1",
+      "prerequisites": [
+        "AFU + paired",
+        "iOS < 26.7 (patched in 26.7)",
+        "pymobiledevice3 installed"
+      ],
+      "supported_builds": [],
+      "failed_builds": [],
+      "limitations": [
+        "no recorded hardware validation run yet (validation required)",
+        "research probe only: a positive result is schema acceptance, not acquisition; the Find My gate may block completion"
+      ],
+      "validation_evidence": [],
+      "last_successful_validation": "",
+      "last_failed_validation": "",
+      "test_fixture": "tests/test_exploitrunner.py::TestExecutorGating::test_restore_traversal_version_gate"
     }
   ]
 }
