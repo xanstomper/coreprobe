@@ -19,6 +19,7 @@ Data protection classes (iOS keybags):
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,193 @@ def render_expectations(chip: str = "?", ios: str = "?") -> str:
     lines.append("(Complete*) is encrypted until the passcode is entered once.")
     lines.append("No open-source route bypasses SEP passcode enforcement; that is")
     lines.append("the GrayKey/Cellebrite service gap.")
+    return "\n".join(lines)
+
+
+# AFU preservation: the SEP inactivity-reboot countdown ---------------------
+# iOS 18 introduced an inactivity reboot: the SEP holds the last-unlock
+# time in silicon and reboots the device back to BFU once the window
+# lapses (72h on iOS 18.1+, 7 days on iOS 18.0, no timer before iOS 18).
+# Because the timestamp lives in the SEP, feeding the device a different
+# clock (NTP or otherwise) does NOT move the deadline. What an examiner
+# CAN do is preserve the AFU state: isolate the device, record the
+# countdown, and capture expiring evidence first. That is all this model
+# claims - it is a playbook, not an exploit.
+
+def _ios_version_tuple(ios: str) -> tuple[int, int] | None:
+    """Parse '18.1' / '26.0.1' / '17' -> (major, minor); None if unknown."""
+    if not ios:
+        return None
+    parts = str(ios).strip().split(".")
+    try:
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+    except ValueError:
+        return None
+    return (major, minor)
+
+
+def time_to_bfu(ios: str, last_unlock: datetime | None,
+                now: datetime | None = None) -> dict[str, Any]:
+    """Model the iOS inactivity-reboot countdown for an AFU device.
+
+    ios:         version string as reported at intake (e.g. '18.1', '26.2').
+    last_unlock: when the device was last unlocked (examiner-recorded at
+                 intake); None if not recorded.
+    now:         evaluation time; defaults to the current time.
+
+    States: 'afu-safe' (>=24h left), 'afu-expiring' (<24h left),
+    'bfu-imminent' (<2.5h left - the last documented checkpoint),
+    'already-bfu-window' (deadline passed; the device has rebooted or
+    will at next SEP check), 'no-timer' (pre-iOS 18), 'unknown'.
+    """
+    result: dict[str, Any] = {
+        "ios": ios,
+        "applies": False,
+        "deadline_hours": None,
+        "seconds_remaining": None,
+        "state": "unknown",
+        "note": "",
+    }
+    ver = _ios_version_tuple(ios)
+    if ver is None:
+        result["note"] = (
+            "iOS version unknown, so the inactivity-reboot timer cannot be "
+            "modelled. Record the exact iOS version and the last-unlock time "
+            "at intake - without them no countdown is possible.")
+        return result
+    if ver < (18, 0):
+        result["state"] = "no-timer"
+        result["note"] = (
+            "Pre-iOS 18: no inactivity reboot timer. The device stays AFU "
+            "until it loses power or is rebooted manually; standard intake "
+            "isolation still applies.")
+        return result
+    deadline_hours = 72 if ver >= (18, 1) else 168
+    result["applies"] = True
+    result["deadline_hours"] = deadline_hours
+    if last_unlock is None:
+        result["note"] = (
+            f"iOS {ios} reboots to BFU after {deadline_hours}h without an "
+            "unlock, but the last-unlock time was not recorded, so the "
+            "remaining window is unknown. The examiner must record the "
+            "last-unlock time at intake; treat the device as expiring "
+            "until it is known.")
+        return result
+    if now is None:
+        now = datetime.now(last_unlock.tzinfo or timezone.utc)
+    remaining = deadline_hours * 3600 - (now - last_unlock).total_seconds()
+    if remaining <= 0:
+        result["state"] = "already-bfu-window"
+        result["seconds_remaining"] = 0
+        result["note"] = (
+            f"The {deadline_hours}h inactivity window has lapsed: the device "
+            "has rebooted to BFU (or will at the next SEP check). "
+            "Passcode-protected classes are locked again; preservation is "
+            "no longer possible for this unlock cycle.")
+        return result
+    result["seconds_remaining"] = int(remaining)
+    hours_left = remaining / 3600.0
+    if remaining < 2.5 * 3600:
+        result["state"] = "bfu-imminent"
+    elif remaining < 24 * 3600:
+        result["state"] = "afu-expiring"
+    else:
+        result["state"] = "afu-safe"
+    result["note"] = (
+        f"{hours_left:.1f}h remain before the SEP inactivity reboot returns "
+        f"this device to BFU (deadline {deadline_hours}h from last unlock). "
+        "The deadline is held by the SEP in silicon; clock-feeding or NTP "
+        "manipulation cannot move it. Documented checkpoints: 72h/48h/24h/"
+        "2.5h remaining on the 72h timer.")
+    return result
+
+
+# Evidence classes that expire on their own clocks while a device sits in
+# evidence storage - capture these FIRST at AFU intake (Elcomsoft, Oct 2025).
+EXPIRING_EVIDENCE = [
+    {"evidence": "Recently deleted photos", "ttl": "~30 days",
+     "note": "Photos 'Recently Deleted' album purges on its own schedule"},
+    {"evidence": "Deleted iMessages", "ttl": "~30 days",
+     "note": "Messages 'Recently Deleted' retention window"},
+    {"evidence": "Safari history", "ttl": "~30 days per record",
+     "note": "history rows age out record by record"},
+    {"evidence": "KnowledgeC / Biome streams", "ttl": "~28-30 days",
+     "note": "app-usage, focus, and activity streams roll off"},
+    {"evidence": "Unified logs", "ttl": "~10-30 days",
+     "note": "log archive TTL; shortest clock of the five - pull early"},
+]
+
+PRESERVATION_HONESTY = [
+    "This plan preserves AFU state; it does NOT defeat the SEP timer.",
+    "If the deadline passes, the device returns to BFU and, on A12+, "
+    "passcode-protected classes (Complete*) stay locked.",
+    "No step here - isolation, clock handling, or otherwise - bypasses "
+    "the inactivity reboot or SEP passcode enforcement.",
+]
+
+
+def preservation_plan(ios: str, last_unlock: datetime | None = None,
+                      now: datetime | None = None) -> dict[str, Any]:
+    """Ordered AFU intake checklist: countdown, isolation, expiry-first capture.
+
+    This is the open equivalent of what commercial tools sell as AFU
+    'preserve': a disciplined intake playbook. It makes no exploit claim.
+    """
+    countdown = time_to_bfu(ios, last_unlock, now)
+    steps = [
+        {"n": 1, "phase": "record-state",
+         "action": ("Record the unlock state (AFU vs BFU), the exact iOS "
+                    "version, and the last-unlock time; start the countdown."),
+         "detail": (f"countdown state: {countdown['state']} "
+                    f"(deadline_hours={countdown['deadline_hours']}, "
+                    f"seconds_remaining={countdown['seconds_remaining']})")},
+        {"n": 2, "phase": "radio-isolation",
+         "action": ("Isolate the device from radios: airplane mode if the "
+                    "unlocked UI allows it, otherwise a Faraday bag/box for "
+                    "the entire storage and transport period."),
+         "detail": ("Note: on a locked or partially trusted device, verify "
+                    "USB accessory trust and Stolen Device Protection state "
+                    "before assuming host access will persist - record what "
+                    "was observed at intake rather than assuming it.")},
+        {"n": 3, "phase": "expiry-first-capture",
+         "action": ("Capture expiring evidence first, in TTL order, before "
+                    "any bulk acquisition:"),
+         "detail": "; ".join(f"{e['evidence']} ({e['ttl']})"
+                             for e in EXPIRING_EVIDENCE)},
+        {"n": 4, "phase": "acquire-before-deadline",
+         "action": ("Run the full AFU acquisition inside the countdown "
+                    "window; if the window will lapse mid-acquisition, "
+                    "finish the expiring classes first and log the lapse."),
+         "detail": countdown["note"]},
+    ]
+    return {
+        "ios": ios,
+        "countdown": countdown,
+        "steps": steps,
+        "expiring_evidence": [dict(e) for e in EXPIRING_EVIDENCE],
+        "honesty": list(PRESERVATION_HONESTY),
+    }
+
+
+def render_preservation_plan(plan: dict[str, Any]) -> str:
+    cd = plan["countdown"]
+    lines = [
+        f"AFU preservation plan: iOS {plan['ios'] or '?'}",
+        f"  countdown: {cd['state']}  deadline_hours: {cd['deadline_hours']}  "
+        f"seconds_remaining: {cd['seconds_remaining']}",
+        "",
+    ]
+    for s in plan["steps"]:
+        lines.append(f"{s['n']}. [{s['phase']}] {s['action']}")
+        lines.append(f"     {s['detail']}")
+        if s["phase"] == "expiry-first-capture":
+            for e in plan["expiring_evidence"]:
+                lines.append(f"       - {e['evidence']:<28}{e['ttl']:<18}{e['note']}")
+    lines.append("")
+    lines.append("Honest limits:")
+    for h in plan["honesty"]:
+        lines.append(f"- {h}")
     return "\n".join(lines)
 
 
