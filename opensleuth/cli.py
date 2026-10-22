@@ -1140,6 +1140,39 @@ def cmd_capabilities(args):
     print(render(reg, category=getattr(args, "category", "") or ""))
 
 
+def cmd_payloads_list(args):
+    """Payload registry: which AFU route payloads exist, which are present
+    locally, and what SHA-256 is pinned/recorded for each (opensleuth/payloads.py)."""
+    from . import payloads as P
+
+    print(f"payloads dir: {P.payloads_dir()}")
+    for e in P.list_payloads():
+        state = f"present: {e['present_path']}" if e["present_path"] else "MISSING"
+        kind = "manual (examiner-supplied)" if e["manual"] else "fetchable"
+        ver = f" v{e['version']}" if e["version"] else ""
+        print(f"\n{e['name']}{ver}  [{e['slug']}]  {kind}")
+        print(f"  asset: {e['asset'] or '-'}   {state}")
+        if e["pinned_sha256"]:
+            print(f"  pinned sha256:   {e['pinned_sha256']}")
+        if e["recorded_sha256"]:
+            print(f"  recorded sha256: {e['recorded_sha256']}")
+    print('\nfetch one with: opensleuth payloads fetch "<route name>"')
+
+
+def cmd_payloads_fetch(args):
+    """Download the official payload for a route, verify its SHA-256 against
+    the registry pin / recorded hash, and record it in the manifest.
+    Manual (examiner-supplied) entries fail honestly with placement guidance."""
+    from . import payloads as P
+
+    try:
+        dest = P.fetch_payload(args.route)
+    except (ValueError, RuntimeError, OSError) as exc:
+        sys.exit(str(exc))
+    print(f"fetched -> {dest}")
+    print(f"sha256: {P.sha256_of(dest)} (recorded in {dest.parent / P.MANIFEST_NAME})")
+
+
 def cmd_fingerprint(args):
     """Fingerprint the attached device with per-property source+confidence."""
     from .fingerprint import fingerprint_device, render as fp_render
@@ -2461,6 +2494,13 @@ def main(argv=None):
     cap.add_argument("--audit", action="store_true", help="run the consistency auditor (exit 1 on failure)")
     cap.add_argument("--registry", default="", help="path to capabilities.json")
     cap.set_defaults(fn=cmd_capabilities)
+    pay = sub.add_parser("payloads", help="AFU route payloads: registry, local presence, verified fetch (Dopamine/TrollStore/Misaka...)")
+    pay_sub = pay.add_subparsers(dest="pl", required=True)
+    payl = pay_sub.add_parser("list", help="registry + local presence + pinned/recorded hashes")
+    payl.set_defaults(fn=cmd_payloads_list)
+    payf = pay_sub.add_parser("fetch", help="download + hash-verify the official payload for a route")
+    payf.add_argument("route", help='route name or keyword, e.g. "Dopamine 3" or trollstore')
+    payf.set_defaults(fn=cmd_payloads_fetch)
     fp_ = sub.add_parser("fingerprint", help="device fingerprint with per-property source+confidence")
     fp_.add_argument("--json", action="store_true")
     fp_.set_defaults(fn=cmd_fingerprint)

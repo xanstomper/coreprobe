@@ -56,7 +56,7 @@ const SECTION_META = {
   files: ["Files", "Documents and file system"],
   forensics: ["Forensics", "Timeline, SQLite & multi-hash analysis"],
   reports: ["Reports", "CASE/UCO & evidentiary certification"],
-  exploits: ["Exploits", "Public iOS exploit catalog (92 routes)"],
+  exploits: ["Exploits", "Public iOS exploit catalog (93 routes)"],
   tools: ["Tools", "Open-source forensic toolchain + install status"],
   research: ["Research", "Zero-day research: campaigns, traces, leads"],
   bfu: ["BFU Lab", "Modern-phone BFU: FS intelligence, keybags, decrypt"],
@@ -451,7 +451,7 @@ function pageDashboard() {
     <div class="page-title">Dashboard</div>
     <div class="page-sub">Overview of your forensic analysis progress, hardware state, and evidence sources.</div>
     <div class="metric-row">
-      ${[["Total Devices", totalDevices, "devices", "devices"],["Artifacts Found", artifactCount.toLocaleString(), "forensics", "forensics"],["Exploit Routes", "92 Cataloged", "exploits", "exploits"],["Cases", CASES.length || 1, "reports", "reports"]]
+      ${[["Total Devices", totalDevices, "devices", "devices"],["Artifacts Found", artifactCount.toLocaleString(), "forensics", "forensics"],["Exploit Routes", "93 Cataloged", "exploits", "exploits"],["Cases", CASES.length || 1, "reports", "reports"]]
         .map(([l, v, ic, nav]) => `<div class="metric-card">${ICONS[ic]}<div class="metric-body"><div class="metric-label">${l}</div><div class="metric-value">${v}</div><div class="metric-link" data-nav="${nav}">View ${l.replace("Total ","").replace(" Found","")} →</div></div></div>`).join("")}
     </div>
     <div class="two-col">
@@ -1397,6 +1397,67 @@ async function renderAutoExploitPane(st) {
     ${lines ? `<div style="padding:10px 14px;border-top:1px solid var(--border2);max-height:160px;overflow:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted);background:#090b0e">${lines}</div>` : ""}`;
 }
 
+/* ---------------- payloads (AFU route payload manager) ---------------- */
+let PAYLOADS_STATE = null;
+
+async function refreshPayloads(force) {
+  if (PAYLOADS_STATE && !force) return PAYLOADS_STATE;
+  PAYLOADS_STATE = await api("/api/payloads");
+  return PAYLOADS_STATE;
+}
+
+function renderPayloadsPanel() {
+  const rows = (PAYLOADS_STATE?.payloads || []).map(p => {
+    const present = !!p.present_path;
+    const pill = present
+      ? `<span class="status-pill green">PRESENT</span>`
+      : `<span class="status-pill red">MISSING</span>`;
+    const manual = p.manual ? ` <span class="status-pill gray">MANUAL</span>` : "";
+    const hash = (p.recorded_sha256 || p.pinned_sha256 || "").slice(0, 16);
+    const action = present
+      ? `<span class="mono" style="font-size:11px;color:var(--muted)">${esc(String(p.present_path).split("/").pop())}</span>`
+      : p.manual
+        ? `<span style="font-size:11px;color:var(--muted)">examiner-supplied — place the file in the payloads dir (see CLI: opensleuth payloads list)</span>`
+        : `<button class="btn primary" style="padding:2px 10px;font-size:11px" onclick="fetchPayload('${esc(p.name).replace(/'/g, "\\'")}', '${esc(p.slug)}')">Fetch</button>`;
+    return `<tr>
+      <td class="mono"><b>${esc(p.name)}</b>${p.version ? ` <span style="color:var(--muted)">v${esc(p.version)}</span>` : ""}</td>
+      <td>${pill}${manual}</td>
+      <td class="mono" style="font-size:11px">${esc(p.asset || "—")}</td>
+      <td class="mono" style="font-size:11px">${hash ? hash + "…" : "—"}</td>
+      <td>${action} <span id="payload-msg-${esc(p.slug)}" style="font-size:11px"></span></td>
+    </tr>`;
+  }).join("");
+  return `
+    <div class="panel-card">
+      <div class="panel-card-head">
+        Route Payloads (SIDELOAD / AFU app routes)
+        <span class="status-pill" style="font-weight:400">dir: ${esc(PAYLOADS_STATE?.payloads_dir || "~/payloads")}</span>
+        <button class="btn" style="margin-left:auto;padding:2px 10px;font-size:11px" onclick="refreshPayloads(true).then(() => render())">Refresh</button>
+      </div>
+      <table class="data"><thead><tr><th>Payload</th><th>Status</th><th>Asset</th><th>SHA-256</th><th>Action</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5">No payload registry data.</td></tr>`}</tbody></table>
+    </div>`;
+}
+
+async function fetchPayload(route, slug) {
+  const msg = document.getElementById("payload-msg-" + slug);
+  if (msg) msg.textContent = "fetching + verifying…";
+  notify("Payload Fetch", `Fetching payload for ${route}...`, "info", "EXPLOIT");
+  const r = await api("/api/payloads/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ route }),
+  });
+  if (r.ok) {
+    notify("Payload Fetched", `${route}: ${r.path} (sha256 ${(r.sha256 || "").slice(0, 16)}…)`, "success", "EXPLOIT");
+    if (r.payloads) PAYLOADS_STATE = { payloads: r.payloads, payloads_dir: PAYLOADS_STATE?.payloads_dir };
+    await render();
+  } else {
+    if (msg) msg.textContent = r.error || "fetch failed";
+    notify("Payload Fetch Failed", r.error || "fetch failed", "error", "EXPLOIT");
+  }
+}
+
 async function pageExploits() {
   if (!EXPLOIT_FILTER_CHIP && DEVICE?.chip) EXPLOIT_FILTER_CHIP = DEVICE.chip;
   if (!EXPLOIT_FILTER_IOS && DEVICE?.ios) EXPLOIT_FILTER_IOS = DEVICE.ios;
@@ -1422,6 +1483,8 @@ async function pageExploits() {
 
   await refreshAutoExploit();
   const aePane = await renderAutoExploitPane(AEXPLOIT);
+  await refreshPayloads();
+  const payloadsPane = renderPayloadsPanel();
 
   const chipsList = ["", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15", "A16", "A17", "M1", "M2", "M3", "M4"];
   const layersList = ["", "bootrom", "sep", "kernel", "userspace", "trollstore", "pac/ppl"];
@@ -1506,6 +1569,9 @@ async function pageExploits() {
       </div>
       <div id="ae-pane">${aePane}</div>
     </div>
+
+    <!-- Route Payloads (payload manager) -->
+    ${payloadsPane}
 
     <!-- Target Evaluation Card -->
     <div class="panel-card">

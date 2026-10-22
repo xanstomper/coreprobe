@@ -413,7 +413,43 @@ def _save_settings(data):
     return current
 
 
-def _execute_single_route(route_name, allow_destructive=False):
+def _payloads_list():
+    """Payload registry + local presence for the GUI payloads panel.
+
+    Thin seam over opensleuth/payloads.py (all logic lives there); factored
+    at module level so tests can exercise it without HTTP.
+    """
+    from .. import payloads as P
+
+    return {"payloads": P.list_payloads(), "payloads_dir": str(P.payloads_dir())}
+
+
+def _payloads_fetch(route):
+    """Fetch + hash-verify the payload for a route, for the GUI panel.
+
+    Returns a JSON-able result dict. Fetch failures (manual/examiner-supplied
+    entries, hash mismatch, network errors) come back as
+    ``{"ok": False, "error": ...}`` with the examiner-actionable message —
+    this helper never raises.
+    """
+    from .. import payloads as P
+
+    route = (route or "").strip()
+    if not route:
+        return {"ok": False, "error": "no route given"}
+    try:
+        dest = P.fetch_payload(route)
+    except (ValueError, RuntimeError, OSError) as exc:
+        _notify("Payload Fetch Failed", str(exc), "error", "EXPLOIT")
+        return {"ok": False, "route": route, "error": str(exc)}
+    digest = P.sha256_of(dest)
+    _notify("Payload Fetched", f"{route}: {dest.name} (sha256 {digest[:16]}...)",
+            "success", "EXPLOIT")
+    return {"ok": True, "route": route, "path": str(dest), "sha256": digest,
+            "payloads": P.list_payloads()}
+
+
+def _execute_single_route(route_name, allow_destructive=False, timeout=None):
     """Execute or verify preconditions for any single exploit route from the catalog."""
     from ..exploits import ROUTES, BY_NAME
     from ..exploitrunner import probe_target, _bin, _strategy_for_route, _EXECUTORS
@@ -486,17 +522,11 @@ def _execute_single_route(route_name, allow_destructive=False):
         _mode, _deployable = "research_only", False
     target = probe_target()
 
-    strat_map = {
-        "checkm8": "checkm8_pwn",
-        "usbliter8": "usbliter8_pwn",
-        "blackbird": "blackbird_sep",
-        "palera1n": "palera1n_jailbreak",
-        "checkra1n": "checkra1n",
-        "limera1n": "a4_bootrom",
-        "pongo_ramdisk": "pongo_ramdisk",
-        "dfu_helper": "dfu_helper",
-    }
-    strat = strat_map.get(route_name) or _strategy_for_route(r)
+    # Strategy resolution is owned by exploitrunner._strategy_for_route
+    # (layer + keyword based, case-insensitive). The old exact-name
+    # strat_map here was case-sensitive ('Blackbird' missed 'blackbird')
+    # and silently fell back to afu_agent for most boot-chain routes.
+    strat = _strategy_for_route(r)
     executor = _EXECUTORS.get(strat)
 
     status_info = {
@@ -548,7 +578,27 @@ def _execute_single_route(route_name, allow_destructive=False):
         return {"ok": False, "status": "no_executor", "message": msg, "info": status_info}
 
     try:
-        ok, detail, output = executor(target, timeout=120)
+        # Dispatch exactly like exploitrunner.run_plan: route-aware
+        # executors (a `route` parameter) learn WHICH route they are
+        # running so payload lookup installs that route's payload, and
+        # the timeout defaults to the executor's own declared default
+        # (e.g. palera1n_jailbreak/checkra1n = 600s) instead of a
+        # hardcoded 120s that truncated long routes. An explicit request
+        # timeout overrides the executor default.
+        import inspect as _inspect
+        try:
+            _params = _inspect.signature(executor).parameters
+        except (TypeError, ValueError):
+            _params = {}
+        _timeout = timeout
+        if _timeout is None:
+            _p = _params.get("timeout")
+            _timeout = (_p.default if _p is not None
+                        and _p.default is not _inspect.Parameter.empty else 300)
+        if "route" in _params:
+            ok, detail, output = executor(target, timeout=_timeout, route=route_name)
+        else:
+            ok, detail, output = executor(target, timeout=_timeout)
         level = "success" if ok else "warning"
         msg = f"{route_name}: {detail}"
         _notify(f"Route Executed: {route_name}", msg, level, "EXPLOIT")
@@ -812,6 +862,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     payload["recommendation"] = []
             self._send(200, json.dumps(payload, default=str))
+        elif path == "/api/payloads":
+            self._send(200, json.dumps(_payloads_list(), default=str))
         elif path == "/api/notifications":
             self._send(200, json.dumps({"notifications": NOTIFICATIONS}))
         elif path == "/api/settings":
@@ -1239,8 +1291,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b'{"ok":true}')
         elif parsed.path == "/api/settings":
             self._send(200, json.dumps(_save_settings(data)))
+        elif parsed.path == "/api/payloads/fetch":
+            self._send(200, json.dumps(_payloads_fetch(data.get("route", "")), default=str))
         elif parsed.path == "/api/exploit/execute":
-            self._send(200, json.dumps(_execute_single_route(data.get("route", ""), data.get("allow_destructive", False))))
+            self._send(200, json.dumps(_execute_single_route(data.get("route", ""), data.get("allow_destructive", False), timeout=data.get("timeout"))))
         elif parsed.path == "/api/timeline":
             self._send(200, json.dumps(_generate_timeline(data.get("case_id", ""))))
         else:
